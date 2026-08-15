@@ -6,11 +6,12 @@ import { renderSheet } from "./ui/sheet";
 import { renderTables } from "./ui/tables";
 import { renderLog } from "./ui/log";
 import { renderRoster } from "./ui/roster";
+import { renderAbout } from "./ui/about";
 import * as obr from "./obr";
 import type { PartyMember } from "./obr";
 import type { ResultPayload } from "./ui/result";
 
-type Tab = "sheet" | "tables" | "log" | "roster";
+type Tab = "sheet" | "tables" | "log" | "roster" | "about";
 
 const MSG_SOURCE = "voidborn";
 const isPopout = new URLSearchParams(location.search).get("popout") === "1";
@@ -144,6 +145,7 @@ function render() {
   if (role === "GM") {
     tabDefs.push({ id: "roster", label: "Roster" });
   }
+  tabDefs.push({ id: "about", label: "About" });
   for (const t of tabDefs) {
     const btn = document.createElement("button");
     btn.className = `tab-btn ${currentTab === t.id ? "active" : ""}`;
@@ -179,6 +181,8 @@ function render() {
     renderLog(content, log, role, clearLog);
   } else if (currentTab === "roster") {
     renderRoster(content, partyMembers);
+  } else if (currentTab === "about") {
+    renderAbout(content);
   }
 }
 
