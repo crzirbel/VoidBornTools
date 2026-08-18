@@ -76,6 +76,54 @@ export function rollOnTable(table: RollTable): TableRollResult {
   return { roll, name: entry.name, desc: entry.desc };
 }
 
+export type FreeDieSize = 4 | 6 | 8 | 10 | 12 | 20 | 100;
+
+export interface FreeDieRoll {
+  sides: FreeDieSize;
+  value: number;
+}
+
+export interface FreeRollResult {
+  rolls: FreeDieRoll[];
+  total: number;
+}
+
+/** Standard 1..sides die, distinct from the rulebook's 0-based D10 test convention. */
+function rollStandardDie(sides: number): number {
+  return Math.floor(Math.random() * sides) + 1;
+}
+
+/** Percentile d100 as two D10s (tens 0/10/../90 + units 0-9), OBR dice-tray style. 00+0 = 100. */
+function rollPercentileDie(): number {
+  const tens = rollDie(10) * 10;
+  const units = rollDie(10);
+  const result = tens + units;
+  return result === 0 ? 100 : result;
+}
+
+/** Roll a free-form pool of standard dice (the simple roller on the Tables tab). */
+export function rollFreeDice(sizes: FreeDieSize[]): FreeRollResult {
+  const rolls = sizes.map((sides) => ({
+    sides,
+    value: sides === 100 ? rollPercentileDie() : rollStandardDie(sides),
+  }));
+  const total = rolls.reduce((sum, r) => sum + r.value, 0);
+  return { rolls, total };
+}
+
+export function buildFreeRollLogEntry(playerName: string, result: FreeRollResult): RollLogEntry {
+  const breakdown = result.rolls.map((r) => `d${r.sides}: ${r.value}`).join(", ");
+  return {
+    id: makeLogId(),
+    playerName,
+    label: "Dice Roll",
+    dice: result.rolls.map((r) => r.value),
+    outcome: "info",
+    detail: `${breakdown} — Total: ${result.total}`,
+    timestamp: Date.now(),
+  };
+}
+
 let logCounter = 0;
 export function makeLogId(): string {
   logCounter += 1;
