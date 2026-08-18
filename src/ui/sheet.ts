@@ -442,8 +442,7 @@ export function renderSheet(
     });
 
     const actions = document.createElement("div");
-    actions.style.display = "flex";
-    actions.style.gap = "0.15rem";
+    actions.className = "actions-cell";
 
     let atkRollBtn: HTMLButtonElement | null = null;
     if (locked) {
