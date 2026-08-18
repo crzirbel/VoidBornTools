@@ -3,7 +3,7 @@
 A character sheet, dice roller, and GM resolution-table tool for the **Void Born**
 (Departmento Colonia) tabletop RPG, built as an [Owlbear Rodeo](https://www.owlbear.rodeo/) extension.
 
-Current version: **v0.7**
+Current version: **v0.8**
 
 ## Features
 
@@ -14,7 +14,8 @@ Current version: **v0.7**
   Weapon DMG fields support formulas (e.g. `STR+2`) evaluated at roll time.
 - **Tables tab** — one-click rolls on Critical Hit, Critical Fail, Injury, Vehicle
   Damage, Hallucinations, Perils of the Warp, and Corruption, plus a Luck Coin
-  flip. Anyone (player or GM) can roll.
+  flip and a simple Dice Roller (d4/d6/d8/d10/d12/d20/d100 pool, roll, reset).
+  Anyone (player or GM) can roll.
 - **Log tab** — a shared, live-updating roll log visible to everyone in the room,
   capped at the most recent 30 rolls.
 - **Roster tab** (GM only) — a read-only overview of the connected party.

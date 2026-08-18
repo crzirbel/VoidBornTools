@@ -5,6 +5,13 @@ type ChangelogEntry = {
 
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "v0.8",
+    notes: [
+      "Added a simple Dice Roller to the Tables tab — tap d4/d6/d8/d10/d12/d20/d100 to build a pool, then Roll (results post to the shared Log)",
+      "Fixed weapon row column alignment on the Sheet tab when locked",
+    ],
+  },
+  {
     version: "v0.7",
     notes: [
       "Added the About tab (usage guide, changelog, feedback button)",
@@ -77,7 +84,7 @@ export function renderAbout(container: HTMLElement) {
     },
     {
       heading: "Tables",
-      body: "Shared resolution tables (Critical Hit, Critical Fail, Injury, Vehicle Damage, Hallucinations, Perils of the Warp, Corruption) plus the Luck Coin flip. Anyone can roll on these, and results post to the shared Log.",
+      body: "Shared resolution tables (Critical Hit, Critical Fail, Injury, Vehicle Damage, Hallucinations, Perils of the Warp, Corruption), the Luck Coin flip, and a simple Dice Roller (d4-d20, d100) for anything off-sheet. Anyone can roll, and results post to the shared Log.",
     },
     {
       heading: "Log",
