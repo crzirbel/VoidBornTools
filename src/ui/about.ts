@@ -5,6 +5,13 @@ type ChangelogEntry = {
 
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "v0.9",
+    notes: [
+      "Added a per-weapon \"Extra DMG Dice / Hit\" effect (e.g. the Gnawing Daemon Weapon trait) — rolls that many additional DMG dice for every HIT that lands",
+      "Added a Charge button to the Tables tab — rolls MOV + d10/2 (rounded down) and shows your max possible Charge move",
+    ],
+  },
+  {
     version: "v0.8",
     notes: [
       "Added a simple Dice Roller to the Tables tab — tap d4/d6/d8/d10/d12/d20/d100 to build a pool, then Roll (results post to the shared Log)",

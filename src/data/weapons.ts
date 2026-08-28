@@ -187,6 +187,7 @@ export function weaponFromCatalog(entry: WeaponCatalogEntry): Weapon {
     atkBonus: 0,
     hitBonus: 0,
     dmgBonus: 0,
+    extraDmgDicePerHit: 0,
   };
 }
 

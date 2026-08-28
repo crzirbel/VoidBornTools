@@ -23,6 +23,7 @@ import {
   rollAttack,
   rollDamage,
   weaponAtkDiceCount,
+  weaponDamageDiceCount,
   weaponDamageTarget,
   weaponHitTarget,
 } from "../combat";
@@ -590,7 +591,7 @@ export function renderSheet(
       dmgCountInput.type = "number";
       dmgCountInput.min = "0";
       dmgCountInput.value = "0";
-      dmgCountInput.title = "Number of DMG dice to roll - defaults to hits, adjust if some were saved against";
+      dmgCountInput.title = "Number of DMG dice to roll - defaults to hits (plus any Extra DMG Dice/Hit effect), adjust if some were saved against";
       combatRow.appendChild(dmgCountInput);
 
       dmgRollBtn = document.createElement("button");
@@ -635,14 +636,18 @@ export function renderSheet(
         resetModifierChecks();
 
         if (hitsLabel) hitsLabel.textContent = `Hits: ${atk.hits}`;
-        if (dmgCountInput) dmgCountInput.value = String(atk.hits);
+        if (dmgCountInput) dmgCountInput.value = String(weaponDamageDiceCount(atk.hits, weapon));
       });
     }
 
     // Per-weapon Effects (hidden unless this specific weapon needs to modify
     // the sheet's math, e.g. a masterwork item with its own bonus).
     if (!locked) {
-      const hasEffects = weapon.atkBonus !== 0 || weapon.hitBonus !== 0 || weapon.dmgBonus !== 0;
+      const hasEffects =
+        weapon.atkBonus !== 0 ||
+        weapon.hitBonus !== 0 ||
+        weapon.dmgBonus !== 0 ||
+        weapon.extraDmgDicePerHit !== 0;
       const effToggle = document.createElement("button");
       effToggle.className = "btn secondary small";
       effToggle.style.marginTop = "0.3rem";
@@ -656,14 +661,19 @@ export function renderSheet(
       block.appendChild(effToggle);
       block.appendChild(effBox);
 
-      const effFields: { key: "atkBonus" | "hitBonus" | "dmgBonus"; label: string }[] = [
+      const effFields: { key: "atkBonus" | "hitBonus" | "dmgBonus" | "extraDmgDicePerHit"; label: string; title?: string }[] = [
         { key: "atkBonus", label: "ATK Bonus" },
         { key: "hitBonus", label: "HIT Bonus" },
         { key: "dmgBonus", label: "DMG Bonus" },
+        {
+          key: "extraDmgDicePerHit",
+          label: "Extra DMG Dice / Hit",
+          title: "e.g. Gnawing: \"If you HIT your target, roll 2 extra DMG dice.\" - set to 2",
+        },
       ];
       const effGrid = document.createElement("div");
       effGrid.className = "field-row";
-      effGrid.style.gridTemplateColumns = "repeat(3, 1fr)";
+      effGrid.style.gridTemplateColumns = "repeat(2, 1fr)";
       for (const f of effFields) {
         const wrap = document.createElement("div");
         const label = document.createElement("label");
@@ -671,6 +681,7 @@ export function renderSheet(
         wrap.appendChild(label);
         const input = document.createElement("input");
         input.type = "number";
+        if (f.title) input.title = f.title;
         input.value = String(weapon[f.key]);
         input.addEventListener("input", () => {
           weapon[f.key] = Number(input.value) || 0;

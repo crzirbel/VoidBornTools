@@ -189,6 +189,32 @@ export function buildAttackLogEntry(
   };
 }
 
+export interface ChargeResult {
+  die: number; // 1-10, standard physical d10
+  bonus: number; // floor(die / 2)
+  mov: number;
+  total: number; // mov + bonus
+}
+
+/** Charge move: MOV + floor(d10 / 2), rolled on a standard 1-10 die. */
+export function rollCharge(mov: number): ChargeResult {
+  const die = rollStandardDie(10);
+  const bonus = Math.floor(die / 2);
+  return { die, bonus, mov, total: mov + bonus };
+}
+
+export function buildChargeLogEntry(playerName: string, result: ChargeResult): RollLogEntry {
+  return {
+    id: makeLogId(),
+    playerName,
+    label: "Charge",
+    dice: [result.die],
+    outcome: "info",
+    detail: `d10: ${result.die} → +${result.bonus} move (MOV ${result.mov} + ${result.bonus} = ${result.total}")`,
+    timestamp: Date.now(),
+  };
+}
+
 export function buildLuckLogEntry(playerName: string, pass: boolean): RollLogEntry {
   return {
     id: makeLogId(),

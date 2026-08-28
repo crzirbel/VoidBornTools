@@ -44,6 +44,7 @@ export function migrateSheet(stored: unknown): CharacterSheet {
       atkBonus: w.atkBonus ?? 0,
       hitBonus: w.hitBonus ?? 0,
       dmgBonus: w.dmgBonus ?? 0,
+      extraDmgDicePerHit: w.extraDmgDicePerHit ?? 0,
     }));
   }
 

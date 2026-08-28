@@ -176,7 +176,7 @@ function render() {
       importSheet
     );
   } else if (currentTab === "tables") {
-    renderTables(content, playerName, handleRoll);
+    renderTables(content, sheet, playerName, handleRoll);
   } else if (currentTab === "log") {
     renderLog(content, log, role, clearLog);
   } else if (currentTab === "roster") {

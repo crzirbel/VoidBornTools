@@ -25,6 +25,9 @@ export interface Weapon {
   atkBonus: number;
   hitBonus: number;
   dmgBonus: number;
+  // Extra DMG dice rolled for each successful HIT (e.g. the Gnawing Daemon
+  // Weapon trait: "roll 2 extra DMG dice" per HIT). 0 = no bonus dice.
+  extraDmgDicePerHit: number;
 }
 
 export function emptyWeapon(): Weapon {
@@ -40,6 +43,7 @@ export function emptyWeapon(): Weapon {
     atkBonus: 0,
     hitBonus: 0,
     dmgBonus: 0,
+    extraDmgDicePerHit: 0,
   };
 }
 

@@ -183,6 +183,15 @@ export function rollAttack(
   return { dice, target, hits, crits };
 }
 
+/**
+ * How many DMG dice a given number of HITs produces. Normally 1 die per HIT;
+ * a weapon with extraDmgDicePerHit (e.g. Gnawing: "roll 2 extra DMG dice" per
+ * HIT) adds that many additional dice for every HIT that landed.
+ */
+export function weaponDamageDiceCount(hits: number, weapon: Weapon): number {
+  return Math.max(0, hits) * (1 + (weapon.extraDmgDicePerHit || 0));
+}
+
 export interface DamageDie {
   value: number;
   success: boolean;
