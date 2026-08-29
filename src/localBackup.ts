@@ -10,7 +10,7 @@ const KEY = "voidborn-tools:sheet-backup";
  */
 export function isSheetBlank(sheet: CharacterSheet): boolean {
   return (
-    !sheet.name.trim() &&
+    (!sheet.name.trim() || sheet.name.trim() === "New Colonist") &&
     !sheet.handle.trim() &&
     !sheet.species.trim() &&
     !sheet.trait.trim() &&
@@ -29,23 +29,34 @@ export function isSheetBlank(sheet: CharacterSheet): boolean {
  * never block the actual save.
  */
 export function backupSheetLocally(sheet: CharacterSheet): void {
-  if (isSheetBlank(sheet)) return;
+  if (isSheetBlank(sheet)) {
+    console.log("[VoidBorn/backup] Skipping local backup - sheet looks blank.");
+    return;
+  }
   try {
     localStorage.setItem(KEY, JSON.stringify({ sheet, savedAt: Date.now() }));
+    console.log("[VoidBorn/backup] Local backup written.", { name: sheet.name, updatedAt: sheet.updatedAt });
   } catch (err) {
-    console.warn("Local sheet backup failed (non-fatal):", err);
+    console.error("[VoidBorn/backup] Local backup FAILED (localStorage threw):", err);
   }
 }
 
 export function readLocalBackup(): { sheet: CharacterSheet; savedAt: number } | null {
   try {
     const raw = localStorage.getItem(KEY);
-    if (!raw) return null;
+    if (!raw) {
+      console.log("[VoidBorn/backup] No local backup key present in localStorage.");
+      return null;
+    }
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || !parsed.sheet) return null;
+    if (!parsed || typeof parsed !== "object" || !parsed.sheet) {
+      console.log("[VoidBorn/backup] Local backup key present but malformed.", parsed);
+      return null;
+    }
+    console.log("[VoidBorn/backup] Local backup found.", { name: parsed.sheet.name, savedAt: parsed.savedAt });
     return parsed;
   } catch (err) {
-    console.warn("Reading local sheet backup failed (non-fatal):", err);
+    console.error("[VoidBorn/backup] Reading local backup FAILED (localStorage threw):", err);
     return null;
   }
 }

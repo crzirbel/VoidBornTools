@@ -34,7 +34,11 @@ let debounceTimer: ReturnType<typeof setTimeout> | undefined;
 
 function debounceSave(sheet: CharacterSheet, onSave: (s: CharacterSheet) => void) {
   clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(() => onSave(sheet), 300);
+  console.log("[VoidBorn/sheet.ts] Edit detected, debounce (re)started (300ms)");
+  debounceTimer = setTimeout(() => {
+    console.log("[VoidBorn/sheet.ts] Debounce fired, calling onSave with current sheet snapshot");
+    onSave(sheet);
+  }, 300);
 }
 
 /**

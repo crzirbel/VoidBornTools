@@ -3,7 +3,7 @@
 A character sheet, dice roller, and Arbitrator resolution-table tool for the **Void Born**
 (Departmento Colonia) tabletop RPG, built as an [Owlbear Rodeo](https://www.owlbear.rodeo/) extension.
 
-Current version: **v1.0.2**
+Current version: **v1.0.3**
 
 ## Features
 
@@ -45,9 +45,15 @@ Current version: **v1.0.2**
   repo's GitHub Issues via a Cloudflare Worker API route (`/api/*`), with a
   honeypot spam guard.
 
-Character sheets are saved per-player (private to you, persists automatically
-via Owlbear player metadata, scoped to the room you're in). The roll log and
-Luck & Chaos token pool are shared room metadata.
+Character sheets, the roll log, and the Luck & Chaos token pool are all
+stored in shared room metadata (keyed per player for sheets, so one
+player's save can't collide with another's). Room metadata has a documented
+16kB total cap shared across everything an extension stores there, so a
+very large party with heavily-loaded characters could theoretically
+approach it - worth keeping an eye on. Sheets previously lived in Owlbear's
+player metadata, which turned out not to reliably survive a page reload
+despite saves reporting success; `obr.ts` still checks that old location
+once as a fallback and carries any legacy data forward automatically.
 
 ## Local development
 
@@ -148,8 +154,11 @@ src/
 
 ## Notes / known limitations
 
-- Arbitrator live-editing of *other players'* sheets is intentionally not supported —
-  Owlbear's permission model only allows a player to write their own metadata.
+- Arbitrator live-editing of *other players'* sheets isn't exposed in the UI.
+  Note this is now an app-level choice rather than an Owlbear permission
+  restriction: since sheets moved to shared room metadata, any connected
+  client is technically capable of writing any player's sheet key. The app
+  itself only ever writes the current player's own key.
 - Wargear modifiers (e.g. armor setting SAV score, scopes adding a HIT bonus)
   aren't automated yet — deferred for a future session.
 - The Corruption table's roll `10` isn't covered in the source rulebook (it lists

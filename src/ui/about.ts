@@ -5,6 +5,13 @@ type ChangelogEntry = {
 
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "v1.0.3",
+    notes: [
+      "Fixed the actual cause of the sheet-wipe bug: character sheets were stored in Owlbear's player metadata, which proved not to reliably survive a page reload even though saves reported success. Sheets now live in room metadata (the same storage already used by the Log and Token Pool, which have never had this problem), keyed per player so there's no risk of one player's save colliding with another's.",
+      "Fixed a bug in the local backup safety net where the default sheet name (\"New Colonist\") was incorrectly treated as real data, which could overwrite a good backup with a blank one.",
+    ],
+  },
+  {
     version: "v1.0.2",
     notes: [
       "Fixed the real cause of the sheet-wipe bug: OBR.player.onChange fires on any change to your player object (e.g. selecting a token in the scene), not just our own saves - a stale metadata snapshot from one of those unrelated events could silently overwrite a more recent edit that hadn't finished saving yet. Sheets are now stamped with a save timestamp and a stale snapshot can never overwrite newer local data.",

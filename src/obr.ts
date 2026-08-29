@@ -5,11 +5,33 @@ import { emptySheet, emptyAbilityEffects, defaultTokenPool, MAX_TOKENS, makeId }
 import type { ResultPayload } from "./ui/result";
 
 const ID = "com.madisonmetro.voidborn";
-const SHEET_KEY = `${ID}/sheet`;
+const SHEET_PREFIX = `${ID}/sheet/`; // sheets live in ROOM metadata, one key per player id
+const LEGACY_SHEET_KEY = `${ID}/sheet`; // old player-metadata location, pre-migration
 const LOG_KEY = `${ID}/log`;
 const TOKEN_POOL_KEY = `${ID}/tokens`;
 const ROLL_CHANNEL = `${ID}/roll-toast`;
 const MAX_LOG_ENTRIES = 30;
+
+function sheetKey(playerId: string): string {
+  return `${SHEET_PREFIX}${playerId}`;
+}
+
+// Verbose, always-on diagnostic logging for the sheet save/load pipeline.
+// Left in deliberately (not stripped for production) so a real repro of the
+// data-loss bug can be captured straight from the browser console.
+function logSheet(...args: unknown[]) {
+  console.log("[VoidBorn/sheet]", new Date().toISOString(), ...args);
+}
+
+function summarize(sheet: CharacterSheet): Record<string, unknown> {
+  return {
+    name: sheet.name,
+    updatedAt: sheet.updatedAt,
+    weapons: sheet.weapons.length,
+    abilities: sheet.abilities.length,
+    wargear: sheet.wargear.length,
+  };
+}
 
 /**
  * Merges stored data over sheet defaults and migrates older shapes:
@@ -61,9 +83,56 @@ export async function getPlayerName(): Promise<string> {
   return OBR.player.getName();
 }
 
-export async function loadSheet(): Promise<CharacterSheet> {
-  const metadata = await OBR.player.getMetadata();
-  return migrateSheet(metadata[SHEET_KEY]);
+export async function getPlayerId(): Promise<string> {
+  return OBR.player.getId();
+}
+
+/**
+ * Sheets now live in ROOM metadata (one key per player id), NOT player
+ * metadata. A real-world repro proved player metadata writes can report
+ * success and even verify via an immediate read-back, yet still be gone
+ * after a plain page reload - almost certainly because that verification
+ * was only ever checking a local/optimistic echo, not a confirmed round
+ * trip to Owlbear's backend. Room metadata is what the Log and Token Pool
+ * already use, and neither of those has ever been reported to lose data,
+ * so this mirrors that proven-reliable path. Trade-off: room metadata has a
+ * documented 16kB TOTAL cap shared by the log, the token pool, and every
+ * party member's sheet combined - worth keeping an eye on for a large party
+ * with heavily-loaded characters.
+ */
+export async function loadSheet(playerId: string): Promise<CharacterSheet> {
+  logSheet("loadSheet: calling OBR.room.getMetadata()...");
+  const metadata = await OBR.room.getMetadata();
+  const raw = metadata[sheetKey(playerId)];
+  logSheet("loadSheet: raw metadata for key", sheetKey(playerId), "=", raw);
+  if (raw !== undefined) {
+    const result = migrateSheet(raw);
+    logSheet("loadSheet: resolved to", summarize(result));
+    return result;
+  }
+
+  // Nothing in the new room-metadata location yet - check the OLD
+  // player-metadata location in case this player has legacy data there from
+  // before the storage migration, so it isn't orphaned by the transition.
+  logSheet("loadSheet: nothing in room metadata, checking legacy player metadata...");
+  try {
+    const playerMetadata = await OBR.player.getMetadata();
+    const legacyRaw = playerMetadata[LEGACY_SHEET_KEY];
+    if (legacyRaw !== undefined) {
+      const migrated = migrateSheet(legacyRaw);
+      logSheet("loadSheet: found legacy player-metadata sheet, carrying it forward", summarize(migrated));
+      // Best-effort forward-migration write; if it fails, the same legacy
+      // data is still there to find again on the next load.
+      saveSheet(playerId, migrated).catch((err) =>
+        logSheet("loadSheet: forward-migration save failed (will retry on next load)", err)
+      );
+      return migrated;
+    }
+  } catch (err) {
+    logSheet("loadSheet: checking legacy player metadata threw (non-fatal)", err);
+  }
+  logSheet("loadSheet: no legacy data either - starting fresh");
+  return emptySheet();
 }
 
 /**
@@ -73,19 +142,31 @@ export async function loadSheet(): Promise<CharacterSheet> {
  * Retries a few times with backoff, then throws so the caller can surface a
  * loud, visible failure instead of pretending the save succeeded.
  */
-export async function saveSheet(sheet: CharacterSheet): Promise<CharacterSheet> {
+export async function saveSheet(playerId: string, sheet: CharacterSheet): Promise<CharacterSheet> {
   const stamped: CharacterSheet = { ...sheet, updatedAt: Date.now() };
+  const key = sheetKey(playerId);
+  logSheet("saveSheet: attempting to save", summarize(stamped));
   const MAX_ATTEMPTS = 3;
   let lastError: unknown;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
-      await OBR.player.setMetadata({ [SHEET_KEY]: stamped });
-      const confirmed = await OBR.player.getMetadata();
-      if (JSON.stringify(confirmed[SHEET_KEY]) === JSON.stringify(stamped)) {
+      await OBR.room.setMetadata({ [key]: stamped });
+      logSheet(`saveSheet: attempt ${attempt} - setMetadata resolved, verifying...`);
+      const confirmed = await OBR.room.getMetadata();
+      const confirmedSheet = confirmed[key];
+      if (JSON.stringify(confirmedSheet) === JSON.stringify(stamped)) {
+        logSheet(`saveSheet: attempt ${attempt} - verified OK`, summarize(stamped));
         return stamped;
       }
+      logSheet(
+        `saveSheet: attempt ${attempt} - VERIFY MISMATCH. Sent:`,
+        summarize(stamped),
+        "Read back:",
+        confirmedSheet
+      );
       lastError = new Error("Save did not verify: metadata read back after saving does not match what was sent.");
     } catch (err) {
+      logSheet(`saveSheet: attempt ${attempt} - threw`, err);
       lastError = err;
     }
     if (attempt < MAX_ATTEMPTS) {
@@ -97,17 +178,26 @@ export async function saveSheet(sheet: CharacterSheet): Promise<CharacterSheet> 
 }
 
 /**
- * NOTE: OBR.player.onChange fires on ANY change to the player object -
- * selecting an item in the scene, changing color, etc. - not just our own
- * metadata writes, despite what an earlier version of this comment assumed.
- * The caller is responsible for ignoring stale snapshots (compare
+ * NOTE: OBR.room.onMetadataChange fires on ANY change to room metadata -
+ * the Log, the Token Pool, or any player's sheet, not just this player's
+ * own. The caller is responsible for ignoring stale snapshots (compare
  * `sheet.updatedAt`) so an unrelated event can't silently revert a more
  * recent local edit that just hasn't finished round-tripping yet.
  */
-export function onSheetChange(callback: (sheet: CharacterSheet) => void) {
-  return OBR.player.onChange((player: Player) => {
-    if (player.metadata[SHEET_KEY]) callback(migrateSheet(player.metadata[SHEET_KEY]));
+export function onSheetChange(playerId: string, callback: (sheet: CharacterSheet) => void) {
+  const key = sheetKey(playerId);
+  return OBR.room.onMetadataChange((metadata) => {
+    const raw = metadata[key];
+    if (raw === undefined) return;
+    const updated = migrateSheet(raw);
+    logSheet("onSheetChange fired, metadata =", summarize(updated));
+    callback(updated);
   });
+}
+
+/** Fires on ANY room metadata change - used to refresh the GM Roster live as players edit their sheets, since sheets now live in room metadata rather than embedded directly in the player object. */
+export function onRoomMetadataChange(callback: () => void) {
+  return OBR.room.onMetadataChange(() => callback());
 }
 
 export async function loadLog(): Promise<RollLogEntry[]> {
@@ -192,31 +282,30 @@ export interface PartyMember {
   sheet: CharacterSheet | null; // null if this player has no Void Born sheet data yet
 }
 
-function toPartyMember(p: Player): PartyMember {
+function toPartyMember(p: Player, roomMetadata: Record<string, unknown>): PartyMember {
+  const raw = roomMetadata[sheetKey(p.id)];
   return {
     id: p.id,
     connectionId: p.connectionId,
     name: p.name,
     color: p.color,
     role: p.role,
-    sheet: p.metadata[SHEET_KEY] ? migrateSheet(p.metadata[SHEET_KEY]) : null,
+    sheet: raw !== undefined ? migrateSheet(raw) : null,
   };
 }
 
-/**
- * Reads every other connected player's sheet directly from their Player
- * object - `metadata` is included in what `party.getPlayers()` returns, so
- * this works live with no broadcast/request needed, and isn't limited by the
- * 16kB room-metadata cap (each player's data is separate). Read-only: there's
- * no API to write another player's metadata, only your own.
- */
+/** Reads every connected player's sheet out of shared room metadata. */
 export async function getPartySheets(): Promise<PartyMember[]> {
-  const players = await OBR.party.getPlayers();
-  return players.map(toPartyMember);
+  const [players, roomMetadata] = await Promise.all([OBR.party.getPlayers(), OBR.room.getMetadata()]);
+  return players.map((p) => toPartyMember(p, roomMetadata));
 }
 
+/** Fires when party membership changes (someone joins/leaves) - not on sheet edits; pair with onRoomMetadataChange for that. */
 export function onPartyChange(callback: (members: PartyMember[]) => void) {
-  return OBR.party.onChange((players) => callback(players.map(toPartyMember)));
+  return OBR.party.onChange(async (players) => {
+    const roomMetadata = await OBR.room.getMetadata();
+    callback(players.map((p) => toPartyMember(p, roomMetadata)));
+  });
 }
 
 /** Broadcasts a roll result toast to every connected player (including yourself). */

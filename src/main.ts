@@ -24,6 +24,7 @@ let log: RollLogEntry[] = [];
 let tokenPool: TokenPool = defaultTokenPool();
 let partyMembers: PartyMember[] = [];
 let playerName = "Colonist";
+let playerId = "";
 let role: "GM" | "PLAYER" = "PLAYER";
 let sheetLocked = true; // sheet starts locked (read/roll mode); Edit unlocks it
 let popoutWindow: Window | null = null;
@@ -57,7 +58,7 @@ function postToPopout(message: Record<string, unknown>) {
 }
 
 function syncPopout() {
-  postToPopout({ kind: "state", role, playerName, sheet, log, tokenPool, partyMembers });
+  postToPopout({ kind: "state", role, playerName, playerId, sheet, log, tokenPool, partyMembers });
 }
 
 async function saveSheet(updated: CharacterSheet) {
@@ -67,7 +68,7 @@ async function saveSheet(updated: CharacterSheet) {
     return;
   }
   try {
-    sheet = await obr.saveSheet(sheet);
+    sheet = await obr.saveSheet(playerId, sheet);
     backupSheetLocally(sheet);
     syncPopout();
   } catch (err) {
@@ -341,15 +342,32 @@ async function initEmbedded() {
   OBR.onReady(async () => {
     role = await obr.getRole();
     playerName = await obr.getPlayerName();
-    sheet = await obr.loadSheet();
+    playerId = await obr.getPlayerId();
+    console.log("[VoidBorn/main] onReady fired. role =", role, "playerName =", playerName, "playerId =", playerId);
+    sheet = await obr.loadSheet(playerId);
     if (isSheetBlank(sheet)) {
-      // The sheet from Owlbear looks like a brand-new/empty character. Check
-      // for a local backup before assuming that's actually correct - if one
-      // exists with real content, surface a recovery prompt instead of
-      // silently treating this as a fresh sheet.
-      const backup = readLocalBackup();
-      if (backup && !isSheetBlank(backup.sheet)) {
-        recoveryBackup = backup;
+      console.log("[VoidBorn/main] Initial load looks blank - re-checking after a short delay in case of a late sync...");
+      // Guard against a possible race where the metadata read returns a
+      // not-yet-synced snapshot immediately after onReady fires. Re-fetch
+      // once, directly, before trusting that this is really a blank sheet.
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      const recheck = await obr.loadSheet(playerId);
+      if (!isSheetBlank(recheck)) {
+        console.log("[VoidBorn/main] Re-check found real data - initial load was stale/racy.", recheck);
+        sheet = recheck;
+      } else {
+        console.log("[VoidBorn/main] Re-check still blank - checking for a local backup...");
+        // The sheet from Owlbear looks like a brand-new/empty character. Check
+        // for a local backup before assuming that's actually correct - if one
+        // exists with real content, surface a recovery prompt instead of
+        // silently treating this as a fresh sheet.
+        const backup = readLocalBackup();
+        if (backup && !isSheetBlank(backup.sheet)) {
+          console.log("[VoidBorn/main] Found a non-blank local backup - showing recovery banner.", backup);
+          recoveryBackup = backup;
+        } else {
+          console.log("[VoidBorn/main] No usable local backup found.", { backup });
+        }
       }
     } else {
       // Good data loaded - mirror it locally so this backup is available in
@@ -364,13 +382,23 @@ async function initEmbedded() {
 
     render();
 
-    obr.onSheetChange((updated) => {
-      // OBR.player.onChange fires on ANY change to the player object, not
-      // just our own metadata writes (e.g. selecting a token in the scene
-      // fires it too). A stale snapshot from one of those unrelated events
-      // must never overwrite more recent local edits, so only accept it if
-      // it's at least as new as what we already have.
-      if (updated.updatedAt < sheet.updatedAt) return;
+    obr.onSheetChange(playerId, (updated) => {
+      // OBR.room.onMetadataChange fires on ANY room metadata change - the
+      // Log, the Token Pool, or any player's sheet - not just our own writes.
+      // A stale snapshot from one of those unrelated events must never
+      // overwrite more recent local edits, so only accept it if it's at
+      // least as new as what we already have.
+      if (updated.updatedAt < sheet.updatedAt) {
+        console.log(
+          "[VoidBorn/main] onSheetChange: REJECTED stale snapshot",
+          { incomingUpdatedAt: updated.updatedAt, currentUpdatedAt: sheet.updatedAt }
+        );
+        return;
+      }
+      console.log(
+        "[VoidBorn/main] onSheetChange: ACCEPTED",
+        { incomingUpdatedAt: updated.updatedAt, previousUpdatedAt: sheet.updatedAt }
+      );
       sheet = updated;
       if (currentTab !== "sheet") render();
       syncPopout();
@@ -394,6 +422,14 @@ async function initEmbedded() {
         if (currentTab === "roster") render();
         syncPopout();
       });
+      // Sheets now live in room metadata rather than embedded in the player
+      // object, so party.onChange alone won't fire when someone edits their
+      // sheet - refresh the roster on any room metadata change too.
+      obr.onRoomMetadataChange(async () => {
+        partyMembers = await obr.getPartySheets();
+        if (currentTab === "roster") render();
+        syncPopout();
+      });
     }
 
     // Shared roll-result notification: rendered by Owlbear Rodeo's own UI
@@ -411,8 +447,7 @@ async function initEmbedded() {
         syncPopout();
       } else if (msg.kind === "save-sheet") {
         cancelPendingSave();
-        sheet = msg.sheet;
-        obr.saveSheet(sheet);
+        saveSheet(msg.sheet);
       } else if (msg.kind === "roll") {
         handleRoll(msg.entry);
       } else if (msg.kind === "clear-log" && role === "GM") {
@@ -446,6 +481,7 @@ function initPopout() {
     if (!msg || msg.source !== MSG_SOURCE || msg.kind !== "state") return;
     role = msg.role;
     playerName = msg.playerName;
+    playerId = msg.playerId;
     sheet = msg.sheet;
     log = msg.log;
     tokenPool = msg.tokenPool ?? defaultTokenPool();
