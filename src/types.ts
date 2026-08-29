@@ -145,3 +145,18 @@ export interface RollLogEntry {
   detail?: string; // e.g. table lookup result text, or a hit-count summary
   timestamp: number;
 }
+
+// ---- Luck & Chaos token pool (shared, persists indefinitely) -------------
+
+export type TokenType = "luck" | "chaos";
+
+export const MAX_TOKENS = 8;
+
+export interface TokenPool {
+  tokens: TokenType[];
+}
+
+/** Campaign start state: all 8 tokens are Luck. */
+export function defaultTokenPool(): TokenPool {
+  return { tokens: Array(MAX_TOKENS).fill("luck") };
+}

@@ -568,6 +568,45 @@ textarea {
   flex: 1;
 }
 
+.token-pool {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  min-height: 2.6rem;
+  padding: 0.5rem;
+  margin-bottom: 0.3rem;
+  background: var(--bg-input);
+  border: 2px solid #000000;
+}
+
+.token-chip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.6rem;
+  height: 2.6rem;
+  padding: 2px;
+  border-radius: 0;
+  cursor: pointer;
+  background: #ffffff;
+  border: 2px solid #000000;
+}
+
+.token-chip img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.token-chip:not(:disabled):hover {
+  background: var(--bg-input);
+}
+
+.token-chip:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
 .log-entry {
   border-bottom: 1px solid #000000;
   padding: 0.4rem 0;

@@ -37,6 +37,17 @@ function debounceSave(sheet: CharacterSheet, onSave: (s: CharacterSheet) => void
   debounceTimer = setTimeout(() => onSave(sheet), 300);
 }
 
+/**
+ * Cancels any pending debounced field-edit save. Must be called before any
+ * *immediate* save (e.g. importing a JSON file) that replaces the sheet
+ * object wholesale - otherwise a debounce timer scheduled from an edit made
+ * moments earlier can fire afterwards and silently overwrite the fresh data
+ * with the stale pre-import sheet.
+ */
+export function cancelPendingSave() {
+  clearTimeout(debounceTimer);
+}
+
 function textField(
   labelText: string,
   value: string,
@@ -573,7 +584,7 @@ export function renderSheet(
     renderModifiers();
 
     // Roll ATK -> shows hits, then Roll DMG is a separate, manually-triggered
-    // step (a GM's SAV throw between the two can change how many hits land).
+    // step (an Arbitrator's SAV throw between the two can change how many hits land).
     let hitsLabel: HTMLSpanElement | null = null;
     let dmgCountInput: HTMLInputElement | null = null;
     let dmgRollBtn: HTMLButtonElement | null = null;

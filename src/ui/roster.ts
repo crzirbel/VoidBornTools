@@ -53,7 +53,7 @@ function renderMemberRow(member: PartyMember): HTMLElement {
   if (member.role === "GM") {
     const badge = document.createElement("span");
     badge.className = "role-badge";
-    badge.textContent = "GM";
+    badge.textContent = "Arbitrator";
     header.appendChild(badge);
   }
 

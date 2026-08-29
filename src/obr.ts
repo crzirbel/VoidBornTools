@@ -1,12 +1,13 @@
 import OBR from "@owlbear-rodeo/sdk";
 import type { Player } from "@owlbear-rodeo/sdk";
-import type { CharacterSheet, RollLogEntry } from "./types";
-import { emptySheet, emptyAbilityEffects, makeId } from "./types";
+import type { CharacterSheet, RollLogEntry, TokenPool, TokenType } from "./types";
+import { emptySheet, emptyAbilityEffects, defaultTokenPool, MAX_TOKENS, makeId } from "./types";
 import type { ResultPayload } from "./ui/result";
 
 const ID = "com.madisonmetro.voidborn";
 const SHEET_KEY = `${ID}/sheet`;
 const LOG_KEY = `${ID}/log`;
+const TOKEN_POOL_KEY = `${ID}/tokens`;
 const ROLL_CHANNEL = `${ID}/roll-toast`;
 const MAX_LOG_ENTRIES = 30;
 
@@ -94,6 +95,56 @@ export function onLogChange(callback: (log: RollLogEntry[]) => void) {
   return OBR.room.onMetadataChange((metadata) => {
     const stored = metadata[LOG_KEY] as RollLogEntry[] | undefined;
     callback(stored ?? []);
+  });
+}
+
+// ---- Luck & Chaos token pool (shared, room-wide, persists indefinitely) --
+
+export async function loadTokenPool(): Promise<TokenPool> {
+  const metadata = await OBR.room.getMetadata();
+  const stored = metadata[TOKEN_POOL_KEY] as TokenPool | undefined;
+  return stored ?? defaultTokenPool();
+}
+
+/** Flips a single token in place: Luck -> Chaos when a player spends it, Chaos -> Luck when the Arbitrator spends it. */
+export async function flipToken(index: number, to: TokenType): Promise<void> {
+  const current = await loadTokenPool();
+  if (current.tokens[index] === undefined || current.tokens[index] === to) return;
+  const next: TokenPool = {
+    tokens: current.tokens.map((t, i) => (i === index ? to : t)),
+  };
+  await OBR.room.setMetadata({ [TOKEN_POOL_KEY]: next });
+}
+
+/**
+ * Permanently removes one token from the pool (a character's death). Returns
+ * the type that was burned so it can be logged, or null if the index was
+ * already gone (e.g. someone else burned it first).
+ */
+export async function burnToken(index: number): Promise<TokenType | null> {
+  const current = await loadTokenPool();
+  const burned = current.tokens[index];
+  if (burned === undefined) return null;
+  const next: TokenPool = {
+    tokens: current.tokens.filter((_, i) => i !== index),
+  };
+  await OBR.room.setMetadata({ [TOKEN_POOL_KEY]: next });
+  return burned;
+}
+
+/** Arbitrator-only: adds a Luck token back into the pool, capped at MAX_TOKENS. */
+export async function grantLuckToken(): Promise<boolean> {
+  const current = await loadTokenPool();
+  if (current.tokens.length >= MAX_TOKENS) return false;
+  const next: TokenPool = { tokens: [...current.tokens, "luck"] };
+  await OBR.room.setMetadata({ [TOKEN_POOL_KEY]: next });
+  return true;
+}
+
+export function onTokenPoolChange(callback: (pool: TokenPool) => void) {
+  return OBR.room.onMetadataChange((metadata) => {
+    const stored = metadata[TOKEN_POOL_KEY] as TokenPool | undefined;
+    callback(stored ?? defaultTokenPool());
   });
 }
 

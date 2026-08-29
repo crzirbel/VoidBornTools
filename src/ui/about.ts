@@ -5,6 +5,15 @@ type ChangelogEntry = {
 
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "v1.0",
+    notes: [
+      "Added Luck & Chaos tokens (replaces the old Luck Coin) — 8 shared tokens that persist indefinitely; players spend Luck tokens (flipping them to Chaos) for ATK/Test bonuses, canceling a Critical Fail, or rerolling a Wound; the Arbitrator spends Chaos tokens (flipping them back to Luck) to force bad outcomes; a player can Burn a token permanently on a character's death, and the Arbitrator can Grant a Luck token back up to the max of 8",
+      "Renamed every \"GM\" reference in the extension to \"Arbitrator\"",
+      "Fixed a data-loss bug where importing a JSON sheet (or, in the standalone editor, loading a file / starting a new sheet) could be silently overwritten moments later by a stale auto-save left over from an edit made just before the import",
+      "Fixed JSON export — it now triggers a real file download instead of opening the raw JSON in a tab and relying on the browser's Save As, which wasn't reliably writing the file to disk",
+    ],
+  },
+  {
     version: "v0.9",
     notes: [
       "Added a per-weapon \"Extra DMG Dice / Hit\" effect (e.g. the Gnawing Daemon Weapon trait) — rolls that many additional DMG dice for every HIT that lands",
@@ -30,7 +39,7 @@ const CHANGELOG: ChangelogEntry[] = [
     version: "v0.6",
     notes: [
       "Added JPEG export — render your sheet as an image to share outside Owlbear Rodeo",
-      "Added the GM Roster tab — view-only overview of the party",
+      "Added the Arbitrator Roster tab — view-only overview of the party",
     ],
   },
   {
@@ -91,15 +100,15 @@ export function renderAbout(container: HTMLElement) {
     },
     {
       heading: "Tables",
-      body: "Shared resolution tables (Critical Hit, Critical Fail, Injury, Vehicle Damage, Hallucinations, Perils of the Warp, Corruption), the Luck Coin flip, and a simple Dice Roller (d4-d20, d100) for anything off-sheet. Anyone can roll, and results post to the shared Log.",
+      body: "Shared resolution tables (Critical Hit, Critical Fail, Injury, Vehicle Damage, Hallucinations, Perils of the Warp, Corruption), a Charge move calculator, the Luck & Chaos token pool, and a simple Dice Roller (d4-d20, d100) for anything off-sheet. Anyone can roll, and results post to the shared Log.",
     },
     {
       heading: "Log",
-      body: "A live, shared history of every roll made in the room, visible to all players. The GM can clear it.",
+      body: "A live, shared history of every roll made in the room, visible to all players. The Arbitrator can clear it.",
     },
     {
       heading: "Roster",
-      body: "GM-only. A read-only overview of the connected party.",
+      body: "Arbitrator-only. A read-only overview of the connected party.",
     },
     {
       heading: "Catalogs",

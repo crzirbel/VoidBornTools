@@ -1,7 +1,7 @@
 import "./style.css";
 import type { CharacterSheet, RollLogEntry } from "./types";
 import { emptySheet } from "./types";
-import { renderSheet } from "./ui/sheet";
+import { renderSheet, cancelPendingSave } from "./ui/sheet";
 import { showResult } from "./ui/result";
 import { migrateSheet } from "./obr";
 import { downloadSheetJson, readFileAsText } from "./jsonio";
@@ -14,7 +14,7 @@ const app = document.getElementById("app")!;
 function handleRoll(entry: RollLogEntry) {
   // No room to log to here - just show the result locally.
   showResult({
-    playerName: "GM",
+    playerName: "Arbitrator",
     title: entry.label,
     dice: entry.dice,
     outcome: entry.outcome,
@@ -59,6 +59,7 @@ function render() {
     if (!file) return;
     try {
       const text = await readFileAsText(file);
+      cancelPendingSave();
       sheet = migrateSheet(JSON.parse(text));
       locked = false;
       render();
@@ -78,6 +79,7 @@ function render() {
   newBtn.className = "btn secondary";
   newBtn.textContent = "New Blank Sheet";
   newBtn.addEventListener("click", () => {
+    cancelPendingSave();
     sheet = emptySheet();
     locked = false;
     render();
@@ -116,7 +118,7 @@ function render() {
   renderSheet(
     content,
     sheet,
-    "GM",
+    "Arbitrator",
     locked,
     (updated) => {
       sheet = updated;
@@ -127,6 +129,7 @@ function render() {
       render();
     },
     (imported) => {
+      cancelPendingSave();
       sheet = imported;
       render();
     }

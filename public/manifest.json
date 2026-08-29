@@ -1,9 +1,9 @@
 {
   "name": "Void Born Tools",
-  "version": "0.8.0",
+  "version": "1.0.0",
   "manifest_version": 1,
   "author": "Chad",
-  "description": "Character sheet, dice roller, and GM resolution tables for the Void Born (Departmento Colonia) tabletop RPG.",
+  "description": "Character sheet, dice roller, and Arbitrator resolution tables for the Void Born (Departmento Colonia) tabletop RPG.",
   "action": {
     "title": "Void Born Tools",
     "icon": "/icon.png",

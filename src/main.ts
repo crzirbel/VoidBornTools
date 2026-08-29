@@ -1,8 +1,8 @@
 import OBR from "@owlbear-rodeo/sdk";
 import "./style.css";
-import type { CharacterSheet, RollLogEntry } from "./types";
-import { emptySheet } from "./types";
-import { renderSheet } from "./ui/sheet";
+import type { CharacterSheet, RollLogEntry, TokenPool } from "./types";
+import { emptySheet, defaultTokenPool } from "./types";
+import { renderSheet, cancelPendingSave } from "./ui/sheet";
 import { renderTables } from "./ui/tables";
 import { renderLog } from "./ui/log";
 import { renderRoster } from "./ui/roster";
@@ -10,6 +10,7 @@ import { renderAbout } from "./ui/about";
 import * as obr from "./obr";
 import type { PartyMember } from "./obr";
 import type { ResultPayload } from "./ui/result";
+import { buildTokenSpendLogEntry, buildTokenBurnLogEntry, buildTokenGrantLogEntry } from "./dice";
 
 type Tab = "sheet" | "tables" | "log" | "roster" | "about";
 
@@ -19,11 +20,19 @@ const isPopout = new URLSearchParams(location.search).get("popout") === "1";
 let currentTab: Tab = "sheet";
 let sheet: CharacterSheet = emptySheet();
 let log: RollLogEntry[] = [];
+let tokenPool: TokenPool = defaultTokenPool();
 let partyMembers: PartyMember[] = [];
 let playerName = "Colonist";
 let role: "GM" | "PLAYER" = "PLAYER";
 let sheetLocked = true; // sheet starts locked (read/roll mode); Edit unlocks it
 let popoutWindow: Window | null = null;
+
+// The Arbitrator role comes from Owlbear's SDK as "GM" - this only maps it
+// to the game's own terminology for display; the underlying role value and
+// every role === "GM" check elsewhere stays as-is.
+function roleLabel(r: "GM" | "PLAYER"): string {
+  return r === "GM" ? "Arbitrator" : "Player";
+}
 
 const app = document.getElementById("app")!;
 
@@ -43,7 +52,7 @@ function postToPopout(message: Record<string, unknown>) {
 }
 
 function syncPopout() {
-  postToPopout({ kind: "state", role, playerName, sheet, log, partyMembers });
+  postToPopout({ kind: "state", role, playerName, sheet, log, tokenPool, partyMembers });
 }
 
 async function saveSheet(updated: CharacterSheet) {
@@ -58,7 +67,11 @@ async function saveSheet(updated: CharacterSheet) {
 
 // Importing replaces every field on the sheet, so (unlike normal typing
 // saves) this needs an immediate full re-render to show the new values.
+// cancelPendingSave() is critical here: without it, a debounce timer left
+// over from an edit made just before the import can fire up to 300ms later
+// and silently overwrite the freshly-imported sheet with the stale one.
 async function importSheet(updated: CharacterSheet) {
+  cancelPendingSave();
   await saveSheet(updated);
   render();
 }
@@ -84,6 +97,42 @@ async function clearLog() {
     return;
   }
   await obr.clearLog();
+}
+
+async function handleSpendLuck(index: number) {
+  if (isPopout) {
+    postToOpener({ kind: "flip-token", index, to: "chaos" });
+    return;
+  }
+  await obr.flipToken(index, "chaos");
+  await handleRoll(buildTokenSpendLogEntry(playerName, "luck"));
+}
+
+async function handleSpendChaos(index: number) {
+  if (isPopout) {
+    postToOpener({ kind: "flip-token", index, to: "luck" });
+    return;
+  }
+  await obr.flipToken(index, "luck");
+  await handleRoll(buildTokenSpendLogEntry(playerName, "chaos"));
+}
+
+async function handleBurnToken(index: number) {
+  if (isPopout) {
+    postToOpener({ kind: "burn-token", index });
+    return;
+  }
+  const burned = await obr.burnToken(index);
+  if (burned) await handleRoll(buildTokenBurnLogEntry(playerName, burned));
+}
+
+async function handleGrantToken() {
+  if (isPopout) {
+    postToOpener({ kind: "grant-token" });
+    return;
+  }
+  const granted = await obr.grantLuckToken();
+  if (granted) await handleRoll(buildTokenGrantLogEntry(playerName));
 }
 
 function openPopout() {
@@ -115,7 +164,7 @@ function render() {
   h1.textContent = "Void Born";
   const badge = document.createElement("span");
   badge.className = "role-badge";
-  badge.textContent = role;
+  badge.textContent = roleLabel(role);
   h1.appendChild(badge);
   header.appendChild(h1);
 
@@ -176,7 +225,14 @@ function render() {
       importSheet
     );
   } else if (currentTab === "tables") {
-    renderTables(content, sheet, playerName, handleRoll);
+    renderTables(content, sheet, playerName, handleRoll, {
+      pool: tokenPool,
+      role,
+      onSpendLuck: handleSpendLuck,
+      onSpendChaos: handleSpendChaos,
+      onBurn: handleBurnToken,
+      onGrant: handleGrantToken,
+    });
   } else if (currentTab === "log") {
     renderLog(content, log, role, clearLog);
   } else if (currentTab === "roster") {
@@ -219,6 +275,7 @@ async function initEmbedded() {
     playerName = await obr.getPlayerName();
     sheet = await obr.loadSheet();
     log = await obr.loadLog();
+    tokenPool = await obr.loadTokenPool();
     if (role === "GM") {
       partyMembers = await obr.getPartySheets();
     }
@@ -237,6 +294,12 @@ async function initEmbedded() {
     obr.onLogChange((updated) => {
       log = updated;
       if (currentTab === "log") render();
+      syncPopout();
+    });
+
+    obr.onTokenPoolChange((updated) => {
+      tokenPool = updated;
+      if (currentTab === "tables") render();
       syncPopout();
     });
 
@@ -262,12 +325,25 @@ async function initEmbedded() {
       if (msg.kind === "hello") {
         syncPopout();
       } else if (msg.kind === "save-sheet") {
+        cancelPendingSave();
         sheet = msg.sheet;
         obr.saveSheet(sheet);
       } else if (msg.kind === "roll") {
         handleRoll(msg.entry);
       } else if (msg.kind === "clear-log" && role === "GM") {
         clearLog();
+      } else if (msg.kind === "flip-token") {
+        obr.flipToken(msg.index, msg.to).then(() => {
+          handleRoll(buildTokenSpendLogEntry(playerName, msg.to === "chaos" ? "luck" : "chaos"));
+        });
+      } else if (msg.kind === "burn-token") {
+        obr.burnToken(msg.index).then((burned) => {
+          if (burned) handleRoll(buildTokenBurnLogEntry(playerName, burned));
+        });
+      } else if (msg.kind === "grant-token" && role === "GM") {
+        obr.grantLuckToken().then((granted) => {
+          if (granted) handleRoll(buildTokenGrantLogEntry(playerName));
+        });
       }
     });
   });
@@ -287,6 +363,7 @@ function initPopout() {
     playerName = msg.playerName;
     sheet = msg.sheet;
     log = msg.log;
+    tokenPool = msg.tokenPool ?? defaultTokenPool();
     partyMembers = msg.partyMembers ?? [];
     render();
   });

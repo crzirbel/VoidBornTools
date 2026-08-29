@@ -85,7 +85,7 @@ export const ABILITY_CATALOG: AbilityCatalogEntry[] = [
   { name: "Daemon Weapon", role: "Peasant", roll: 8, description: "You start play with a Daemon Weapon you inherited…", effects: emptyAbilityEffects() },
   { name: "Family Ties", role: "Peasant", roll: 9, description: "When in peril, your Bond will show up when you most need them", effects: emptyAbilityEffects() },
   { name: "Biologi", role: "Savant", roll: 0, description: "You know the weaknesses of your enemies. Test PRS to ignore SAV", effects: emptyAbilityEffects() },
-  { name: "Haggler", role: "Savant", roll: 1, description: "Acquire gear for significant discounts per GM discretion.", effects: emptyAbilityEffects() },
+  { name: "Haggler", role: "Savant", roll: 1, description: "Acquire gear for significant discounts per Arbitrator discretion.", effects: emptyAbilityEffects() },
   { name: "Form Filler", role: "Savant", roll: 2, description: "You always have the right form and can fill it out very quickly", effects: emptyAbilityEffects() },
   { name: "Scavvy", role: "Savant", roll: 3, description: "Find things in the rubble that others might miss. DM discretion.", effects: emptyAbilityEffects() },
   { name: "Cold Trade", role: "Savant", roll: 4, description: "Know a guy off world to gain rare goods. Access Cold Market.", effects: emptyAbilityEffects() },

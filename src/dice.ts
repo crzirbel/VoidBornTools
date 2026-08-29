@@ -1,4 +1,4 @@
-import type { RollLogEntry } from "./types";
+import type { RollLogEntry, TokenType } from "./types";
 import type { RollTable } from "./data/tables";
 import { lookup } from "./data/tables";
 
@@ -215,17 +215,46 @@ export function buildChargeLogEntry(playerName: string, result: ChargeResult): R
   };
 }
 
-export function buildLuckLogEntry(playerName: string, pass: boolean): RollLogEntry {
+/** A Luck token spent (flips to Chaos) or a Chaos token spent by the Arbitrator (flips to Luck). */
+export function buildTokenSpendLogEntry(playerName: string, spent: TokenType): RollLogEntry {
   return {
     id: makeLogId(),
     playerName,
-    label: "Luck Coin",
+    label: spent === "luck" ? "Luck Token Spent" : "Chaos Token Spent",
     dice: [],
-    outcome: pass ? "success" : "fail",
-    detail: pass ? "Heads — Pass" : "Tails — Fail",
+    outcome: "info",
+    detail:
+      spent === "luck"
+        ? "Luck token spent → becomes a Chaos token"
+        : "Chaos token spent → becomes a Luck token",
     timestamp: Date.now(),
   };
 }
+
+export function buildTokenBurnLogEntry(playerName: string, burned: TokenType): RollLogEntry {
+  return {
+    id: makeLogId(),
+    playerName,
+    label: "Token Burned",
+    dice: [],
+    outcome: "info",
+    detail: `Burned a ${burned === "luck" ? "Luck" : "Chaos"} token — pool permanently reduced by 1`,
+    timestamp: Date.now(),
+  };
+}
+
+export function buildTokenGrantLogEntry(playerName: string): RollLogEntry {
+  return {
+    id: makeLogId(),
+    playerName,
+    label: "Luck Token Granted",
+    dice: [],
+    outcome: "info",
+    detail: "The Arbitrator granted a Luck token to the pool",
+    timestamp: Date.now(),
+  };
+}
+
 export function buildDamageLogEntry(
   playerName: string,
   label: string,
