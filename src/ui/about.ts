@@ -5,6 +5,12 @@ type ChangelogEntry = {
 
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "v1.0.2",
+    notes: [
+      "Fixed the real cause of the sheet-wipe bug: OBR.player.onChange fires on any change to your player object (e.g. selecting a token in the scene), not just our own saves - a stale metadata snapshot from one of those unrelated events could silently overwrite a more recent edit that hadn't finished saving yet. Sheets are now stamped with a save timestamp and a stale snapshot can never overwrite newer local data.",
+    ],
+  },
+  {
     version: "v1.0.1",
     notes: [
       "Sheet saves now retry and verify the write actually landed, and a failure now shows a visible on-screen error instead of failing silently",

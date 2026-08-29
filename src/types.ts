@@ -107,6 +107,12 @@ export interface CharacterSheet {
   wargear: WargearEntry[];
   gold: number;
   weapons: Weapon[];
+  // Stamped fresh on every save. Used to reject stale metadata echoes from
+  // OBR.player.onChange (which fires on ANY player-object change, not just
+  // our own metadata writes - e.g. selecting a token in the scene) so a
+  // late-arriving stale snapshot can never silently overwrite a more recent
+  // local edit that just hasn't finished round-tripping yet.
+  updatedAt: number;
 }
 
 export function emptySheet(name = "New Colonist"): CharacterSheet {
@@ -132,6 +138,7 @@ export function emptySheet(name = "New Colonist"): CharacterSheet {
     wargear: [],
     gold: 50,
     weapons: [],
+    updatedAt: 0,
   };
 }
 

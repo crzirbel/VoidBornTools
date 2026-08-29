@@ -21,6 +21,7 @@ export function migrateSheet(stored: unknown): CharacterSheet {
   if (!stored || typeof stored !== "object") return base;
 
   const merged = { ...base, ...(stored as Partial<CharacterSheet>) } as CharacterSheet;
+  merged.updatedAt = typeof (stored as any).updatedAt === "number" ? (stored as any).updatedAt : 0;
   const rawAbilities = (stored as any).abilities;
 
   if (typeof rawAbilities === "string") {
@@ -72,15 +73,16 @@ export async function loadSheet(): Promise<CharacterSheet> {
  * Retries a few times with backoff, then throws so the caller can surface a
  * loud, visible failure instead of pretending the save succeeded.
  */
-export async function saveSheet(sheet: CharacterSheet): Promise<void> {
+export async function saveSheet(sheet: CharacterSheet): Promise<CharacterSheet> {
+  const stamped: CharacterSheet = { ...sheet, updatedAt: Date.now() };
   const MAX_ATTEMPTS = 3;
   let lastError: unknown;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
-      await OBR.player.setMetadata({ [SHEET_KEY]: sheet });
+      await OBR.player.setMetadata({ [SHEET_KEY]: stamped });
       const confirmed = await OBR.player.getMetadata();
-      if (JSON.stringify(confirmed[SHEET_KEY]) === JSON.stringify(sheet)) {
-        return;
+      if (JSON.stringify(confirmed[SHEET_KEY]) === JSON.stringify(stamped)) {
+        return stamped;
       }
       lastError = new Error("Save did not verify: metadata read back after saving does not match what was sent.");
     } catch (err) {
@@ -94,6 +96,14 @@ export async function saveSheet(sheet: CharacterSheet): Promise<void> {
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
+/**
+ * NOTE: OBR.player.onChange fires on ANY change to the player object -
+ * selecting an item in the scene, changing color, etc. - not just our own
+ * metadata writes, despite what an earlier version of this comment assumed.
+ * The caller is responsible for ignoring stale snapshots (compare
+ * `sheet.updatedAt`) so an unrelated event can't silently revert a more
+ * recent local edit that just hasn't finished round-tripping yet.
+ */
 export function onSheetChange(callback: (sheet: CharacterSheet) => void) {
   return OBR.player.onChange((player: Player) => {
     if (player.metadata[SHEET_KEY]) callback(migrateSheet(player.metadata[SHEET_KEY]));

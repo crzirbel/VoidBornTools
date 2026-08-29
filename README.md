@@ -3,7 +3,7 @@
 A character sheet, dice roller, and Arbitrator resolution-table tool for the **Void Born**
 (Departmento Colonia) tabletop RPG, built as an [Owlbear Rodeo](https://www.owlbear.rodeo/) extension.
 
-Current version: **v1.0**
+Current version: **v1.0.2**
 
 ## Features
 

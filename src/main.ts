@@ -67,7 +67,7 @@ async function saveSheet(updated: CharacterSheet) {
     return;
   }
   try {
-    await obr.saveSheet(sheet);
+    sheet = await obr.saveSheet(sheet);
     backupSheetLocally(sheet);
     syncPopout();
   } catch (err) {
@@ -365,9 +365,12 @@ async function initEmbedded() {
     render();
 
     obr.onSheetChange((updated) => {
-      // Echo of our own saveSheet() call (player metadata is private, so
-      // nothing else can trigger this). Keep state fresh but don't re-render
-      // while the Sheet tab is open, or a focused <input> loses focus mid-type.
+      // OBR.player.onChange fires on ANY change to the player object, not
+      // just our own metadata writes (e.g. selecting a token in the scene
+      // fires it too). A stale snapshot from one of those unrelated events
+      // must never overwrite more recent local edits, so only accept it if
+      // it's at least as new as what we already have.
+      if (updated.updatedAt < sheet.updatedAt) return;
       sheet = updated;
       if (currentTab !== "sheet") render();
       syncPopout();
