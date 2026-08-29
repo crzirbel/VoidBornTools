@@ -11,6 +11,7 @@ import * as obr from "./obr";
 import type { PartyMember } from "./obr";
 import type { ResultPayload } from "./ui/result";
 import { buildTokenSpendLogEntry, buildTokenBurnLogEntry, buildTokenGrantLogEntry } from "./dice";
+import { backupSheetLocally, readLocalBackup, isSheetBlank } from "./localBackup";
 
 type Tab = "sheet" | "tables" | "log" | "roster" | "about";
 
@@ -26,6 +27,10 @@ let playerName = "Colonist";
 let role: "GM" | "PLAYER" = "PLAYER";
 let sheetLocked = true; // sheet starts locked (read/roll mode); Edit unlocks it
 let popoutWindow: Window | null = null;
+// Set at load if the sheet from Owlbear looks blank AND a non-blank local
+// backup exists - offers the player a one-click recovery instead of quietly
+// accepting what might be data loss. Cleared once restored or dismissed.
+let recoveryBackup: { sheet: CharacterSheet; savedAt: number } | null = null;
 
 // The Arbitrator role comes from Owlbear's SDK as "GM" - this only maps it
 // to the game's own terminology for display; the underlying role value and
@@ -59,9 +64,18 @@ async function saveSheet(updated: CharacterSheet) {
   sheet = updated;
   if (isPopout) {
     postToOpener({ kind: "save-sheet", sheet: updated });
-  } else {
+    return;
+  }
+  try {
     await obr.saveSheet(sheet);
+    backupSheetLocally(sheet);
     syncPopout();
+  } catch (err) {
+    console.error("Failed to save character sheet:", err);
+    obr.showNativeNotification(
+      "Your sheet failed to save! Your last changes may not be kept - check your connection and try again, or export a JSON backup now.",
+      "ERROR"
+    );
   }
 }
 
@@ -151,6 +165,56 @@ function openPopout() {
 
 // ---- Render --------------------------------------------------------------
 
+function buildRecoveryBanner(backup: { sheet: CharacterSheet; savedAt: number }): HTMLElement {
+  const banner = document.createElement("div");
+  banner.className = "panel";
+  banner.style.border = "2px solid var(--red-bright)";
+  banner.style.marginBottom = "0.75rem";
+
+  const title = document.createElement("div");
+  title.style.fontFamily = "var(--font-heading)";
+  title.style.fontSize = "0.85rem";
+  title.style.textTransform = "uppercase";
+  title.style.marginBottom = "0.3rem";
+  title.textContent = "Possible sheet data loss detected";
+  banner.appendChild(title);
+
+  const body = document.createElement("div");
+  body.style.fontSize = "0.8rem";
+  body.style.marginBottom = "0.5rem";
+  const when = new Date(backup.savedAt).toLocaleString();
+  body.textContent = `The sheet loaded from Owlbear looks blank, but this browser has a local backup from ${when}. Restore it?`;
+  banner.appendChild(body);
+
+  const row = document.createElement("div");
+  row.style.display = "flex";
+  row.style.gap = "0.4rem";
+
+  const restoreBtn = document.createElement("button");
+  restoreBtn.className = "btn";
+  restoreBtn.textContent = "Restore Local Backup";
+  restoreBtn.addEventListener("click", async () => {
+    cancelPendingSave();
+    const restored = backup.sheet;
+    recoveryBackup = null;
+    await saveSheet(restored);
+    render();
+  });
+  row.appendChild(restoreBtn);
+
+  const dismissBtn = document.createElement("button");
+  dismissBtn.className = "btn secondary";
+  dismissBtn.textContent = "Dismiss";
+  dismissBtn.addEventListener("click", () => {
+    recoveryBackup = null;
+    render();
+  });
+  row.appendChild(dismissBtn);
+
+  banner.appendChild(row);
+  return banner;
+}
+
 function render() {
   app.innerHTML = "";
 
@@ -183,6 +247,10 @@ function render() {
   headerWrap.style.paddingBottom = "0.4rem";
   headerWrap.style.marginBottom = "0.75rem";
   app.appendChild(headerWrap);
+
+  if (recoveryBackup) {
+    app.appendChild(buildRecoveryBanner(recoveryBackup));
+  }
 
   const tabs = document.createElement("div");
   tabs.className = "tabs";
@@ -274,6 +342,20 @@ async function initEmbedded() {
     role = await obr.getRole();
     playerName = await obr.getPlayerName();
     sheet = await obr.loadSheet();
+    if (isSheetBlank(sheet)) {
+      // The sheet from Owlbear looks like a brand-new/empty character. Check
+      // for a local backup before assuming that's actually correct - if one
+      // exists with real content, surface a recovery prompt instead of
+      // silently treating this as a fresh sheet.
+      const backup = readLocalBackup();
+      if (backup && !isSheetBlank(backup.sheet)) {
+        recoveryBackup = backup;
+      }
+    } else {
+      // Good data loaded - mirror it locally so this backup is available in
+      // case something goes wrong on a later save.
+      backupSheetLocally(sheet);
+    }
     log = await obr.loadLog();
     tokenPool = await obr.loadTokenPool();
     if (role === "GM") {

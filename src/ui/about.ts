@@ -5,6 +5,14 @@ type ChangelogEntry = {
 
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "v1.0.1",
+    notes: [
+      "Sheet saves now retry and verify the write actually landed, and a failure now shows a visible on-screen error instead of failing silently",
+      "Added a local backup safety net - every successful save also mirrors to this browser, and if a blank sheet ever loads while a real local backup exists, you'll get a one-click recovery prompt instead of silently losing data",
+      "Replaced the Luck & Chaos summary on the Tables tab with the full house rules text, behind a \"Rules\" toggle",
+    ],
+  },
+  {
     version: "v1.0",
     notes: [
       "Added Luck & Chaos tokens (replaces the old Luck Coin) — 8 shared tokens that persist indefinitely; players spend Luck tokens (flipping them to Chaos) for ATK/Test bonuses, canceling a Critical Fail, or rerolling a Wound; the Arbitrator spends Chaos tokens (flipping them back to Luck) to force bad outcomes; a player can Burn a token permanently on a character's death, and the Arbitrator can Grant a Luck token back up to the max of 8",

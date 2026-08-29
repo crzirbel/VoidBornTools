@@ -41,13 +41,66 @@ export function renderTokenPool(container: HTMLElement, props: TokenPoolProps): 
   }
   panel.appendChild(headerRow);
 
-  const hint = document.createElement("div");
-  hint.className = "empty-state";
-  hint.style.padding = "0 0 0.5rem";
-  hint.style.textAlign = "left";
-  hint.textContent =
-    "Luck tokens add a die to an ATK or Test, cancel a Critical Fail, or reroll a Wound roll. Spending one flips it to Chaos. The Arbitrator spends Chaos tokens to turn a failed ATK into a Critical Fail or force a reroll on Injury/Perils of the Warp - spending flips it back to Luck.";
-  panel.appendChild(hint);
+  const rulesToggle = document.createElement("button");
+  rulesToggle.className = "btn secondary small";
+  rulesToggle.style.marginBottom = "0.5rem";
+  rulesToggle.textContent = "Rules";
+
+  const rulesBox = document.createElement("div");
+  rulesBox.style.display = "none";
+  rulesBox.style.fontSize = "0.8rem";
+  rulesBox.style.marginBottom = "0.6rem";
+  rulesBox.style.lineHeight = "1.4";
+
+  function rulesPara(text: string): HTMLElement {
+    const p = document.createElement("p");
+    p.style.margin = "0 0 0.4rem";
+    p.textContent = text;
+    return p;
+  }
+
+  function rulesList(items: string[]): HTMLElement {
+    const ul = document.createElement("ul");
+    ul.style.margin = "0 0 0.4rem";
+    ul.style.paddingLeft = "1.2rem";
+    for (const item of items) {
+      const li = document.createElement("li");
+      li.textContent = item;
+      ul.appendChild(li);
+    }
+    return ul;
+  }
+
+  rulesBox.appendChild(rulesPara("Start each campaign with 8 shared Luck Tokens between the entire party."));
+  rulesBox.appendChild(rulesPara("Use Luck tokens to do the following:"));
+  rulesBox.appendChild(
+    rulesList(["Add a die to an ATK", "Cancel a Critical Fail", "Add a die to a Test", "Reroll your Wound roll"])
+  );
+  rulesBox.appendChild(
+    rulesPara(
+      "Once you use a Luck Token, they become Chaos Tokens. These are under the control of the Arbitrator."
+    )
+  );
+  rulesBox.appendChild(rulesPara("The Arbitrator uses Chaos Tokens to:"));
+  rulesBox.appendChild(
+    rulesList([
+      "Turn a failed ATK into a Critical Fail",
+      "Force a reroll on the Injury Table",
+      "Force a reroll on Perils of the Warp",
+    ])
+  );
+  rulesBox.appendChild(rulesPara("Chaos Tokens become Luck Tokens when used and the cycle continues."));
+  rulesBox.appendChild(
+    rulesPara(
+      "If a character is killed they may Burn a Token. They survive but must roll on the Injury Table (reroll if 00-19) and the Corruption Table. The token pool is permanently reduced by 1."
+    )
+  );
+
+  rulesToggle.addEventListener("click", () => {
+    rulesBox.style.display = rulesBox.style.display === "none" ? "block" : "none";
+  });
+  panel.appendChild(rulesToggle);
+  panel.appendChild(rulesBox);
 
   let burnMode = false;
 

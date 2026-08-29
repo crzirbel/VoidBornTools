@@ -65,8 +65,33 @@ export async function loadSheet(): Promise<CharacterSheet> {
   return migrateSheet(metadata[SHEET_KEY]);
 }
 
+/**
+ * Saves the sheet, then reads it back to confirm the write actually landed
+ * before resolving - `setMetadata` resolving isn't a guarantee the data is
+ * durably stored, and we've seen sheets go missing with no visible error.
+ * Retries a few times with backoff, then throws so the caller can surface a
+ * loud, visible failure instead of pretending the save succeeded.
+ */
 export async function saveSheet(sheet: CharacterSheet): Promise<void> {
-  await OBR.player.setMetadata({ [SHEET_KEY]: sheet });
+  const MAX_ATTEMPTS = 3;
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      await OBR.player.setMetadata({ [SHEET_KEY]: sheet });
+      const confirmed = await OBR.player.getMetadata();
+      if (JSON.stringify(confirmed[SHEET_KEY]) === JSON.stringify(sheet)) {
+        return;
+      }
+      lastError = new Error("Save did not verify: metadata read back after saving does not match what was sent.");
+    } catch (err) {
+      lastError = err;
+    }
+    if (attempt < MAX_ATTEMPTS) {
+      await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
+    }
+  }
+  console.error("obr.saveSheet: failed after retries", lastError);
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
 export function onSheetChange(callback: (sheet: CharacterSheet) => void) {
