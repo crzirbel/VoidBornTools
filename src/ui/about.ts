@@ -5,27 +5,6 @@ type ChangelogEntry = {
 
 const CHANGELOG: ChangelogEntry[] = [
   {
-    version: "v1.0.3",
-    notes: [
-      "Fixed the actual cause of the sheet-wipe bug: character sheets were stored in Owlbear's player metadata, which proved not to reliably survive a page reload even though saves reported success. Sheets now live in room metadata (the same storage already used by the Log and Token Pool, which have never had this problem), keyed per player so there's no risk of one player's save colliding with another's.",
-      "Fixed a bug in the local backup safety net where the default sheet name (\"New Colonist\") was incorrectly treated as real data, which could overwrite a good backup with a blank one.",
-    ],
-  },
-  {
-    version: "v1.0.2",
-    notes: [
-      "Fixed the real cause of the sheet-wipe bug: OBR.player.onChange fires on any change to your player object (e.g. selecting a token in the scene), not just our own saves - a stale metadata snapshot from one of those unrelated events could silently overwrite a more recent edit that hadn't finished saving yet. Sheets are now stamped with a save timestamp and a stale snapshot can never overwrite newer local data.",
-    ],
-  },
-  {
-    version: "v1.0.1",
-    notes: [
-      "Sheet saves now retry and verify the write actually landed, and a failure now shows a visible on-screen error instead of failing silently",
-      "Added a local backup safety net - every successful save also mirrors to this browser, and if a blank sheet ever loads while a real local backup exists, you'll get a one-click recovery prompt instead of silently losing data",
-      "Replaced the Luck & Chaos summary on the Tables tab with the full house rules text, behind a \"Rules\" toggle",
-    ],
-  },
-  {
     version: "v1.0",
     notes: [
       "Added Luck & Chaos tokens (replaces the old Luck Coin) — 8 shared tokens that persist indefinitely; players spend Luck tokens (flipping them to Chaos) for ATK/Test bonuses, canceling a Critical Fail, or rerolling a Wound; the Arbitrator spends Chaos tokens (flipping them back to Luck) to force bad outcomes; a player can Burn a token permanently on a character's death, and the Arbitrator can Grant a Luck token back up to the max of 8",

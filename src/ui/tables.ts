@@ -127,16 +127,6 @@ function buildChargePanel(
   hint.textContent = "Charge move = MOV + d10/2 (rounded down).";
   panel.appendChild(hint);
 
-  const maxLabel = document.createElement("div");
-  maxLabel.style.marginBottom = "0.5rem";
-  maxLabel.style.fontWeight = "bold";
-  const renderMax = () => {
-    const maxTotal = sheet.mov + Math.floor(10 / 2);
-    maxLabel.textContent = `Max Charge Move: ${maxTotal}" (MOV ${sheet.mov} + 5)`;
-  };
-  renderMax();
-  panel.appendChild(maxLabel);
-
   const chargeBtn = document.createElement("button");
   chargeBtn.className = "btn";
   chargeBtn.textContent = "Roll Charge";

@@ -3,7 +3,36 @@
 A character sheet, dice roller, and Arbitrator resolution-table tool for the **Void Born**
 (Departmento Colonia) tabletop RPG, built as an [Owlbear Rodeo](https://www.owlbear.rodeo/) extension.
 
-Current version: **v1.0.3**
+Current version: **v1.0.4**
+
+## Patch changelog (v1.0.1 - v1.0.4)
+
+These point releases aren't shown in the in-app About tab (which covers
+feature-level milestones only) but are recorded here for reference:
+
+- **v1.0.1** — Sheet saves now retry and verify the write landed, with a
+  visible on-screen error on failure instead of failing silently. Added a
+  local backup safety net (mirrors every successful save to this browser;
+  offers one-click recovery if a blank sheet loads while a real backup
+  exists). Replaced the Luck & Chaos Tables-tab summary with the full house
+  rules text behind a "Rules" toggle.
+- **v1.0.2** — Fixed a stale-echo bug: `OBR.player.onChange` fires on any
+  change to your player object (e.g. selecting a token in the scene), not
+  just our own saves, so a stale snapshot could silently overwrite a more
+  recent edit that hadn't finished saving yet. Sheets are now stamped with a
+  save timestamp and a stale snapshot can never overwrite newer local data.
+- **v1.0.3** — Found the actual root cause of the sheet-wipe bug: sheets
+  were stored in Owlbear's player metadata, which turned out not to
+  reliably survive a page reload even though saves reported success. Sheets
+  now live in room metadata (the same storage the Log and Token Pool
+  already used, which never had this problem), keyed per player so one
+  player's save can't collide with another's. Also fixed a bug in the local
+  backup safety net where the default sheet name ("New Colonist") was
+  incorrectly treated as real data, which could overwrite a good backup
+  with a blank one.
+- **v1.0.4** — Removed the "Max Charge Move" line from the Charge tool.
+  Made the Luck & Chaos "Rules" and "Burn Token" buttons the same size and
+  lined them up in a row.
 
 ## Features
 

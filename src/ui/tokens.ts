@@ -42,8 +42,8 @@ export function renderTokenPool(container: HTMLElement, props: TokenPoolProps): 
   panel.appendChild(headerRow);
 
   const rulesToggle = document.createElement("button");
-  rulesToggle.className = "btn secondary small";
-  rulesToggle.style.marginBottom = "0.5rem";
+  rulesToggle.className = "btn secondary";
+  rulesToggle.style.flex = "1";
   rulesToggle.textContent = "Rules";
 
   const rulesBox = document.createElement("div");
@@ -99,13 +99,11 @@ export function renderTokenPool(container: HTMLElement, props: TokenPoolProps): 
   rulesToggle.addEventListener("click", () => {
     rulesBox.style.display = rulesBox.style.display === "none" ? "block" : "none";
   });
-  panel.appendChild(rulesToggle);
-  panel.appendChild(rulesBox);
 
   let burnMode = false;
 
   const burnBtn = document.createElement("button");
-  burnBtn.style.marginBottom = "0.5rem";
+  burnBtn.style.flex = "1";
 
   const burnHint = document.createElement("div");
   burnHint.style.fontSize = "0.75rem";
@@ -113,6 +111,18 @@ export function renderTokenPool(container: HTMLElement, props: TokenPoolProps): 
   burnHint.style.marginBottom = "0.4rem";
   burnHint.style.display = "none";
   burnHint.textContent = "Tap a token below to permanently burn it. This cannot be undone.";
+
+  const actionRow = document.createElement("div");
+  actionRow.style.display = "flex";
+  actionRow.style.gap = "0.4rem";
+  actionRow.style.marginBottom = "0.5rem";
+  actionRow.appendChild(rulesToggle);
+  if (role === "PLAYER") {
+    actionRow.appendChild(burnBtn);
+  }
+  panel.appendChild(actionRow);
+  panel.appendChild(rulesBox);
+  panel.appendChild(burnHint);
 
   const gridWrap = document.createElement("div");
   gridWrap.className = "token-pool";
@@ -178,11 +188,6 @@ export function renderTokenPool(container: HTMLElement, props: TokenPoolProps): 
     burnMode = !burnMode;
     updateBurnUi();
   });
-
-  if (role === "PLAYER") {
-    panel.appendChild(burnBtn);
-    panel.appendChild(burnHint);
-  }
 
   panel.appendChild(gridWrap);
   container.appendChild(panel);
