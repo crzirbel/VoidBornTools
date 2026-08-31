@@ -12,6 +12,17 @@ const TOKEN_POOL_KEY = `${ID}/tokens`;
 const ROLL_CHANNEL = `${ID}/roll-toast`;
 const MAX_LOG_ENTRIES = 30;
 
+// Owlbear room metadata has a documented 16kB TOTAL cap, shared by the Log,
+// the Token Pool, and every party member's sheet combined. Warn well before
+// that hard limit so a heavily-loaded party doesn't find out via a failed
+// or truncated save.
+const ROOM_METADATA_WARN_BYTES = 14 * 1024;
+let sizeWarningShownThisSession = false;
+
+function byteSize(value: unknown): number {
+  return new TextEncoder().encode(JSON.stringify(value)).length;
+}
+
 function sheetKey(playerId: string): string {
   return `${SHEET_PREFIX}${playerId}`;
 }
@@ -75,6 +86,28 @@ export function migrateSheet(stored: unknown): CharacterSheet {
   return merged;
 }
 
+/**
+ * Warns (console always, native notification once per session) when the
+ * combined room metadata is approaching Owlbear's ~16kB total cap. Purely
+ * advisory - it doesn't block or alter the save - so the party can trim
+ * sheet content (long ability/wargear descriptions are the biggest lever)
+ * before a write actually starts failing or getting truncated.
+ */
+function checkRoomMetadataSize(metadata: Record<string, unknown>): void {
+  const totalBytes = Object.values(metadata).reduce((sum: number, v) => sum + byteSize(v), 0);
+  if (totalBytes <= ROOM_METADATA_WARN_BYTES) return;
+  logSheet(
+    `saveSheet: WARNING - combined room metadata is ~${totalBytes} bytes, approaching Owlbear's ~16kB room metadata cap.`
+  );
+  if (!sizeWarningShownThisSession) {
+    sizeWarningShownThisSession = true;
+    showNativeNotification(
+      "This room's saved data (sheets, log, tokens) is getting close to Owlbear's storage limit. Trimming long ability/wargear descriptions can help.",
+      "WARNING"
+    );
+  }
+}
+
 export async function getRole(): Promise<"GM" | "PLAYER"> {
   return OBR.player.getRole();
 }
@@ -136,11 +169,19 @@ export async function loadSheet(playerId: string): Promise<CharacterSheet> {
 }
 
 /**
- * Saves the sheet, then reads it back to confirm the write actually landed
- * before resolving - `setMetadata` resolving isn't a guarantee the data is
- * durably stored, and we've seen sheets go missing with no visible error.
- * Retries a few times with backoff, then throws so the caller can surface a
- * loud, visible failure instead of pretending the save succeeded.
+ * Saves the sheet, then reads it back to confirm the write landed before
+ * resolving. IMPORTANT CAVEAT (found while diagnosing the sheet-wipe bug):
+ * both `setMetadata` and this verification read-back only round-trip to the
+ * local Owlbear host tab's in-memory state (confirmed from the SDK's own
+ * message-bus source - see `RoomApi`/`MessageBus`), not to Owlbear's backend
+ * or other clients. So this can report a verified success 3/3 times and the
+ * write can still fail to durably sync (dropped connection, backgrounded
+ * tab, etc.), surfacing later as a stale-but-not-blank sheet on reload. That
+ * failure mode is why `loadSheet`'s caller (main.ts) no longer trusts room
+ * metadata unconditionally - it reconciles against the local backup's
+ * `updatedAt` and takes whichever is actually newer. This retry/verify loop
+ * is still useful for catching genuine same-tab rejections, just not relied
+ * on as the sole safety net anymore.
  */
 export async function saveSheet(playerId: string, sheet: CharacterSheet): Promise<CharacterSheet> {
   const stamped: CharacterSheet = { ...sheet, updatedAt: Date.now() };
@@ -156,6 +197,7 @@ export async function saveSheet(playerId: string, sheet: CharacterSheet): Promis
       const confirmedSheet = confirmed[key];
       if (JSON.stringify(confirmedSheet) === JSON.stringify(stamped)) {
         logSheet(`saveSheet: attempt ${attempt} - verified OK`, summarize(stamped));
+        checkRoomMetadataSize(confirmed);
         return stamped;
       }
       logSheet(

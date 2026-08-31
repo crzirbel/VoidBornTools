@@ -69,7 +69,7 @@ async function saveSheet(updated: CharacterSheet) {
   }
   try {
     sheet = await obr.saveSheet(playerId, sheet);
-    backupSheetLocally(sheet);
+    backupSheetLocally(playerId, sheet);
     syncPopout();
   } catch (err) {
     console.error("Failed to save character sheet:", err);
@@ -345,7 +345,30 @@ async function initEmbedded() {
     playerId = await obr.getPlayerId();
     console.log("[VoidBorn/main] onReady fired. role =", role, "playerName =", playerName, "playerId =", playerId);
     sheet = await obr.loadSheet(playerId);
-    if (isSheetBlank(sheet)) {
+
+    // Room metadata's write acknowledgment only confirms the local Owlbear
+    // host tab accepted the write, not that it durably reached the backend -
+    // so a reload shortly after an edit can come back with a stale-but-NOT-
+    // blank snapshot that a blank-only check would never catch, silently
+    // reverting recent work. Timestamps are the only reliable signal here,
+    // so check this before anything else: if the local backup is newer than
+    // what Owlbear just returned, trust local and self-heal room metadata
+    // back up to match it.
+    const backup = readLocalBackup(playerId);
+    if (backup && !isSheetBlank(backup.sheet) && backup.sheet.updatedAt > sheet.updatedAt) {
+      console.log(
+        "[VoidBorn/main] Local backup is newer than what Owlbear returned - recovering from local and re-syncing.",
+        { localUpdatedAt: backup.sheet.updatedAt, roomUpdatedAt: sheet.updatedAt }
+      );
+      sheet = backup.sheet;
+      saveSheet(sheet).catch((err) =>
+        console.error("[VoidBorn/main] Re-sync of recovered local backup failed (will retry on next edit):", err)
+      );
+      obr.showNativeNotification(
+        "Recovered a newer local save that hadn't finished syncing to this room.",
+        "WARNING"
+      );
+    } else if (isSheetBlank(sheet)) {
       console.log("[VoidBorn/main] Initial load looks blank - re-checking after a short delay in case of a late sync...");
       // Guard against a possible race where the metadata read returns a
       // not-yet-synced snapshot immediately after onReady fires. Re-fetch
@@ -355,24 +378,22 @@ async function initEmbedded() {
       if (!isSheetBlank(recheck)) {
         console.log("[VoidBorn/main] Re-check found real data - initial load was stale/racy.", recheck);
         sheet = recheck;
+      } else if (backup && !isSheetBlank(backup.sheet)) {
+        // Still blank after the recheck, and the earlier newer-than check
+        // didn't fire (backup isn't newer, just present) - e.g. the very
+        // first load after this player's room metadata was wiped for some
+        // other reason. Surface a manual recovery prompt rather than
+        // auto-restoring, since we can't prove local is actually correct
+        // here the way the timestamp check above can.
+        console.log("[VoidBorn/main] Found a non-blank local backup - showing recovery banner.", backup);
+        recoveryBackup = backup;
       } else {
-        console.log("[VoidBorn/main] Re-check still blank - checking for a local backup...");
-        // The sheet from Owlbear looks like a brand-new/empty character. Check
-        // for a local backup before assuming that's actually correct - if one
-        // exists with real content, surface a recovery prompt instead of
-        // silently treating this as a fresh sheet.
-        const backup = readLocalBackup();
-        if (backup && !isSheetBlank(backup.sheet)) {
-          console.log("[VoidBorn/main] Found a non-blank local backup - showing recovery banner.", backup);
-          recoveryBackup = backup;
-        } else {
-          console.log("[VoidBorn/main] No usable local backup found.", { backup });
-        }
+        console.log("[VoidBorn/main] No usable local backup found.");
       }
     } else {
       // Good data loaded - mirror it locally so this backup is available in
       // case something goes wrong on a later save.
-      backupSheetLocally(sheet);
+      backupSheetLocally(playerId, sheet);
     }
     log = await obr.loadLog();
     tokenPool = await obr.loadTokenPool();
@@ -400,6 +421,7 @@ async function initEmbedded() {
         { incomingUpdatedAt: updated.updatedAt, previousUpdatedAt: sheet.updatedAt }
       );
       sheet = updated;
+      backupSheetLocally(playerId, sheet);
       if (currentTab !== "sheet") render();
       syncPopout();
     });

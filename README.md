@@ -3,9 +3,9 @@
 A character sheet, dice roller, and Arbitrator resolution-table tool for the **Void Born**
 (Departmento Colonia) tabletop RPG, built as an [Owlbear Rodeo](https://www.owlbear.rodeo/) extension.
 
-Current version: **v1.0.4**
+Current version: **v1.0.5**
 
-## Patch changelog (v1.0.1 - v1.0.4)
+## Patch changelog (v1.0.1 - v1.0.5)
 
 These point releases aren't shown in the in-app About tab (which covers
 feature-level milestones only) but are recorded here for reference:
@@ -33,6 +33,18 @@ feature-level milestones only) but are recorded here for reference:
 - **v1.0.4** — Removed the "Max Charge Move" line from the Charge tool.
   Made the Luck & Chaos "Rules" and "Burn Token" buttons the same size and
   lined them up in a row.
+- **v1.0.5** — Found a deeper root cause of the sheet-wipe bug, confirmed by
+  reading the Owlbear SDK's own source: a "verified" save only confirms the
+  local Owlbear tab accepted the write, not that it durably reached the
+  server, so a reload shortly after an edit could come back with an older
+  (but not blank) sheet that the old blank-only recovery check never caught
+  - silently reverting recent work and then overwriting the local backup
+  with that stale data too. Loading a sheet now compares timestamps and
+  keeps whichever of Owlbear's copy or the local backup is actually newer,
+  self-healing Owlbear's copy if local wins. Local backups are now scoped
+  per player (previously one shared backup slot per browser). Added a
+  warning (console + one-time in-room notice) if a room's combined saved
+  data is approaching Owlbear's ~16kB room metadata limit.
 
 ## Features
 
