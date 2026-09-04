@@ -504,11 +504,20 @@ function initPopout() {
     role = msg.role;
     playerName = msg.playerName;
     playerId = msg.playerId;
+    // The opener bundles sheet+log+tokenPool+partyMembers into every "state"
+    // sync, including ones triggered by something unrelated (e.g. any roll
+    // pushed to the shared log). A blind render() on every one of those was
+    // the root cause of the DMG box resetting to 0 after a HIT: it wiped the
+    // in-progress "Hits: N" / pre-filled DMG dice count between the ATK roll
+    // and the follow-up DMG roll. Only force a re-render of the Sheet tab
+    // when the sheet itself actually changed - other tabs still refresh
+    // normally since they don't hold that kind of transient state.
+    const sheetChanged = JSON.stringify(sheet) !== JSON.stringify(msg.sheet);
     sheet = msg.sheet;
     log = msg.log;
     tokenPool = msg.tokenPool ?? defaultTokenPool();
     partyMembers = msg.partyMembers ?? [];
-    render();
+    if (currentTab !== "sheet" || sheetChanged) render();
   });
 
   render(); // show something immediately while we wait for state
