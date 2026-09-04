@@ -28,6 +28,14 @@ let playerId = "";
 let role: "GM" | "PLAYER" = "PLAYER";
 let sheetLocked = true; // sheet starts locked (read/roll mode); Edit unlocks it
 let popoutWindow: Window | null = null;
+// The Arbitrator's 4 quick-swap sheet slots (for running multiple NPCs/
+// enemies without re-importing a JSON file each time). Meaningless for
+// PLAYER role. gmSlotNames is a small local cache of each slot's sheet
+// name for the slot-bar buttons - populated lazily so the initial render
+// isn't blocked on 3 extra loads.
+let gmSlot = 1;
+let gmSlotNames: string[] = Array(obr.GM_SLOT_COUNT).fill("");
+let unsubscribeSheetChange: (() => void) | null = null;
 // Set at load if the sheet from Owlbear looks blank AND a non-blank local
 // backup exists - offers the player a one-click recovery instead of quietly
 // accepting what might be data loss. Cleared once restored or dismissed.
@@ -47,6 +55,13 @@ const app = document.getElementById("app")!;
 // plain browser window (which has no Owlbear iframe connection), they relay
 // the action back to the embedded window via postMessage instead.
 
+// The Arbitrator's own sheet storage uses a per-slot virtual id instead of
+// their real player id (see obr.gmSlotStorageId) - every other player just
+// uses their real id, unchanged.
+function sheetStorageId(): string {
+  return role === "GM" ? obr.gmSlotStorageId(playerId, gmSlot) : playerId;
+}
+
 function postToOpener(message: Record<string, unknown>) {
   window.opener?.postMessage({ source: MSG_SOURCE, ...message }, "*");
 }
@@ -58,7 +73,7 @@ function postToPopout(message: Record<string, unknown>) {
 }
 
 function syncPopout() {
-  postToPopout({ kind: "state", role, playerName, playerId, sheet, log, tokenPool, partyMembers });
+  postToPopout({ kind: "state", role, playerName, playerId, sheet, log, tokenPool, partyMembers, gmSlot, gmSlotNames });
 }
 
 async function saveSheet(updated: CharacterSheet) {
@@ -68,8 +83,10 @@ async function saveSheet(updated: CharacterSheet) {
     return;
   }
   try {
-    sheet = await obr.saveSheet(playerId, sheet);
-    backupSheetLocally(playerId, sheet);
+    const storageId = sheetStorageId();
+    sheet = await obr.saveSheet(storageId, sheet);
+    backupSheetLocally(storageId, sheet);
+    if (role === "GM") gmSlotNames[gmSlot - 1] = sheet.name;
     syncPopout();
   } catch (err) {
     console.error("Failed to save character sheet:", err);
@@ -216,6 +233,30 @@ function buildRecoveryBanner(backup: { sheet: CharacterSheet; savedAt: number })
   return banner;
 }
 
+function buildGmSlotBar(): HTMLElement {
+  const bar = document.createElement("div");
+  bar.className = "gm-slot-bar";
+  for (let s = 1; s <= obr.GM_SLOT_COUNT; s++) {
+    const btn = document.createElement("button");
+    btn.className = `gm-slot-btn ${s === gmSlot ? "active" : ""}`;
+    const num = document.createElement("div");
+    num.className = "gm-slot-btn-num";
+    num.textContent = String(s);
+    btn.appendChild(num);
+    const name = gmSlotNames[s - 1];
+    if (name) {
+      const nameEl = document.createElement("div");
+      nameEl.className = "gm-slot-btn-name";
+      nameEl.textContent = name;
+      btn.appendChild(nameEl);
+    }
+    btn.title = name ? `Slot ${s}: ${name}` : `Slot ${s} (empty)`;
+    btn.addEventListener("click", () => switchGmSlot(s));
+    bar.appendChild(btn);
+  }
+  return bar;
+}
+
 function render() {
   app.innerHTML = "";
 
@@ -280,6 +321,12 @@ function render() {
   app.appendChild(content);
 
   if (currentTab === "sheet") {
+    // The Arbitrator's 4 quick-swap slots (for running multiple NPCs/
+    // enemies) only make sense on their own Sheet tab - players never see
+    // this, and it doesn't apply to any other tab.
+    if (role === "GM") {
+      content.appendChild(buildGmSlotBar());
+    }
     renderSheet(
       content,
       sheet,
@@ -333,6 +380,135 @@ function notificationVariant(payload: ResultPayload): "DEFAULT" | "SUCCESS" | "W
   }
 }
 
+/**
+ * Loads a sheet from room metadata for the given storage id and reconciles
+ * it against that same id's local backup (see obr.loadSheet's docblock for
+ * why this reconciliation is necessary at all). Shared between the initial
+ * onReady load and every GM slot switch, since both need the identical
+ * stale-vs-blank handling - just against a different storage id each time.
+ */
+async function loadAndReconcileSheet(storageId: string, checkLegacy: boolean): Promise<CharacterSheet> {
+  let resolved = await obr.loadSheet(storageId, checkLegacy);
+
+  // Room metadata's write acknowledgment only confirms the local Owlbear
+  // host tab accepted the write, not that it durably reached the backend -
+  // so a reload shortly after an edit can come back with a stale-but-NOT-
+  // blank snapshot that a blank-only check would never catch, silently
+  // reverting recent work. Timestamps are the only reliable signal here,
+  // so check this before anything else: if the local backup is newer than
+  // what Owlbear just returned, trust local and self-heal room metadata
+  // back up to match it.
+  const backup = readLocalBackup(storageId);
+  if (backup && !isSheetBlank(backup.sheet) && backup.sheet.updatedAt > resolved.updatedAt) {
+    console.log(
+      "[VoidBorn/main] Local backup is newer than what Owlbear returned - recovering from local and re-syncing.",
+      { storageId, localUpdatedAt: backup.sheet.updatedAt, roomUpdatedAt: resolved.updatedAt }
+    );
+    resolved = backup.sheet;
+    obr.saveSheet(storageId, resolved).catch((err) =>
+      console.error("[VoidBorn/main] Re-sync of recovered local backup failed (will retry on next edit):", err)
+    );
+    obr.showNativeNotification(
+      "Recovered a newer local save that hadn't finished syncing to this room.",
+      "WARNING"
+    );
+  } else if (isSheetBlank(resolved)) {
+    console.log("[VoidBorn/main] Initial load looks blank - re-checking after a short delay in case of a late sync...");
+    // Guard against a possible race where the metadata read returns a
+    // not-yet-synced snapshot immediately after onReady fires. Re-fetch
+    // once, directly, before trusting that this is really a blank sheet.
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    const recheck = await obr.loadSheet(storageId, checkLegacy);
+    if (!isSheetBlank(recheck)) {
+      console.log("[VoidBorn/main] Re-check found real data - initial load was stale/racy.", recheck);
+      resolved = recheck;
+    } else if (backup && !isSheetBlank(backup.sheet)) {
+      // Still blank after the recheck, and the earlier newer-than check
+      // didn't fire (backup isn't newer, just present) - e.g. the very
+      // first load after this id's room metadata was wiped for some other
+      // reason. Surface a manual recovery prompt rather than auto-
+      // restoring, since we can't prove local is actually correct here the
+      // way the timestamp check above can.
+      console.log("[VoidBorn/main] Found a non-blank local backup - showing recovery banner.", backup);
+      recoveryBackup = backup;
+    } else {
+      console.log("[VoidBorn/main] No usable local backup found.");
+    }
+  } else {
+    // Good data loaded - mirror it locally so this backup is available in
+    // case something goes wrong on a later save.
+    backupSheetLocally(storageId, resolved);
+  }
+  return resolved;
+}
+
+/** (Re)subscribes the shared onSheetChange listener to a given storage id - tears down the previous subscription first, since only one should ever be active (the currently-viewed sheet/slot). */
+function subscribeSheetChange(storageId: string) {
+  if (unsubscribeSheetChange) unsubscribeSheetChange();
+  unsubscribeSheetChange = obr.onSheetChange(storageId, (updated) => {
+    // OBR.room.onMetadataChange fires on ANY room metadata change - the
+    // Log, the Token Pool, or any player's sheet - not just our own writes.
+    // A stale snapshot from one of those unrelated events must never
+    // overwrite more recent local edits, so only accept it if it's at
+    // least as new as what we already have.
+    if (updated.updatedAt < sheet.updatedAt) {
+      console.log(
+        "[VoidBorn/main] onSheetChange: REJECTED stale snapshot",
+        { incomingUpdatedAt: updated.updatedAt, currentUpdatedAt: sheet.updatedAt }
+      );
+      return;
+    }
+    console.log(
+      "[VoidBorn/main] onSheetChange: ACCEPTED",
+      { incomingUpdatedAt: updated.updatedAt, previousUpdatedAt: sheet.updatedAt }
+    );
+    sheet = updated;
+    backupSheetLocally(storageId, sheet);
+    if (role === "GM") gmSlotNames[gmSlot - 1] = sheet.name;
+    if (currentTab !== "sheet") render();
+    syncPopout();
+  });
+}
+
+/** Background-loads the other 3 slots' sheet names so the slot bar can show a caption under each button, without blocking the initial render on 3 extra loads. */
+async function prefetchGmSlotNames() {
+  for (let s = 1; s <= obr.GM_SLOT_COUNT; s++) {
+    if (s === gmSlot) continue; // already loaded as the active slot
+    try {
+      const slotSheet = await obr.loadSheet(obr.gmSlotStorageId(playerId, s), false);
+      gmSlotNames[s - 1] = slotSheet.name;
+    } catch (err) {
+      console.error(`[VoidBorn/main] Failed to prefetch GM slot ${s} name (non-fatal):`, err);
+    }
+  }
+  if (currentTab === "sheet") render();
+  syncPopout();
+}
+
+/** Switches which of the Arbitrator's 4 sheet slots is active - only meaningful for role === "GM". */
+async function switchGmSlot(newSlot: number) {
+  if (role !== "GM" || newSlot === gmSlot || newSlot < 1 || newSlot > obr.GM_SLOT_COUNT) return;
+  if (isPopout) {
+    postToOpener({ kind: "switch-gm-slot", slot: newSlot });
+    return;
+  }
+  // A debounce timer left over from an edit on the OLD slot must never be
+  // allowed to fire after switching - it would save the old slot's stale
+  // sheet object under the NEW slot's storage key, clobbering whatever was
+  // already there. Same class of bug as the JSON-import race.
+  cancelPendingSave();
+  gmSlot = newSlot;
+  obr.saveGmActiveSlot(playerId, gmSlot).catch((err) =>
+    console.error("[VoidBorn/main] Failed to save active GM slot (will retry on next switch):", err)
+  );
+  const storageId = sheetStorageId();
+  sheet = await loadAndReconcileSheet(storageId, false);
+  gmSlotNames[gmSlot - 1] = sheet.name;
+  subscribeSheetChange(storageId);
+  render();
+  syncPopout();
+}
+
 async function initEmbedded() {
   if (!OBR.isAvailable) {
     app.innerHTML = `<div class="empty-state" style="padding-top:2rem">This extension only runs inside Owlbear Rodeo.</div>`;
@@ -343,58 +519,15 @@ async function initEmbedded() {
     role = await obr.getRole();
     playerName = await obr.getPlayerName();
     playerId = await obr.getPlayerId();
-    console.log("[VoidBorn/main] onReady fired. role =", role, "playerName =", playerName, "playerId =", playerId);
-    sheet = await obr.loadSheet(playerId);
-
-    // Room metadata's write acknowledgment only confirms the local Owlbear
-    // host tab accepted the write, not that it durably reached the backend -
-    // so a reload shortly after an edit can come back with a stale-but-NOT-
-    // blank snapshot that a blank-only check would never catch, silently
-    // reverting recent work. Timestamps are the only reliable signal here,
-    // so check this before anything else: if the local backup is newer than
-    // what Owlbear just returned, trust local and self-heal room metadata
-    // back up to match it.
-    const backup = readLocalBackup(playerId);
-    if (backup && !isSheetBlank(backup.sheet) && backup.sheet.updatedAt > sheet.updatedAt) {
-      console.log(
-        "[VoidBorn/main] Local backup is newer than what Owlbear returned - recovering from local and re-syncing.",
-        { localUpdatedAt: backup.sheet.updatedAt, roomUpdatedAt: sheet.updatedAt }
-      );
-      sheet = backup.sheet;
-      saveSheet(sheet).catch((err) =>
-        console.error("[VoidBorn/main] Re-sync of recovered local backup failed (will retry on next edit):", err)
-      );
-      obr.showNativeNotification(
-        "Recovered a newer local save that hadn't finished syncing to this room.",
-        "WARNING"
-      );
-    } else if (isSheetBlank(sheet)) {
-      console.log("[VoidBorn/main] Initial load looks blank - re-checking after a short delay in case of a late sync...");
-      // Guard against a possible race where the metadata read returns a
-      // not-yet-synced snapshot immediately after onReady fires. Re-fetch
-      // once, directly, before trusting that this is really a blank sheet.
-      await new Promise((resolve) => setTimeout(resolve, 800));
-      const recheck = await obr.loadSheet(playerId);
-      if (!isSheetBlank(recheck)) {
-        console.log("[VoidBorn/main] Re-check found real data - initial load was stale/racy.", recheck);
-        sheet = recheck;
-      } else if (backup && !isSheetBlank(backup.sheet)) {
-        // Still blank after the recheck, and the earlier newer-than check
-        // didn't fire (backup isn't newer, just present) - e.g. the very
-        // first load after this player's room metadata was wiped for some
-        // other reason. Surface a manual recovery prompt rather than
-        // auto-restoring, since we can't prove local is actually correct
-        // here the way the timestamp check above can.
-        console.log("[VoidBorn/main] Found a non-blank local backup - showing recovery banner.", backup);
-        recoveryBackup = backup;
-      } else {
-        console.log("[VoidBorn/main] No usable local backup found.");
-      }
-    } else {
-      // Good data loaded - mirror it locally so this backup is available in
-      // case something goes wrong on a later save.
-      backupSheetLocally(playerId, sheet);
+    if (role === "GM") {
+      gmSlot = await obr.loadGmActiveSlot(playerId);
     }
+    console.log("[VoidBorn/main] onReady fired. role =", role, "playerName =", playerName, "playerId =", playerId, "gmSlot =", gmSlot);
+
+    const storageId = sheetStorageId();
+    sheet = await loadAndReconcileSheet(storageId, role !== "GM");
+    if (role === "GM") gmSlotNames[gmSlot - 1] = sheet.name;
+
     log = await obr.loadLog();
     tokenPool = await obr.loadTokenPool();
     if (role === "GM") {
@@ -403,28 +536,11 @@ async function initEmbedded() {
 
     render();
 
-    obr.onSheetChange(playerId, (updated) => {
-      // OBR.room.onMetadataChange fires on ANY room metadata change - the
-      // Log, the Token Pool, or any player's sheet - not just our own writes.
-      // A stale snapshot from one of those unrelated events must never
-      // overwrite more recent local edits, so only accept it if it's at
-      // least as new as what we already have.
-      if (updated.updatedAt < sheet.updatedAt) {
-        console.log(
-          "[VoidBorn/main] onSheetChange: REJECTED stale snapshot",
-          { incomingUpdatedAt: updated.updatedAt, currentUpdatedAt: sheet.updatedAt }
-        );
-        return;
-      }
-      console.log(
-        "[VoidBorn/main] onSheetChange: ACCEPTED",
-        { incomingUpdatedAt: updated.updatedAt, previousUpdatedAt: sheet.updatedAt }
-      );
-      sheet = updated;
-      backupSheetLocally(playerId, sheet);
-      if (currentTab !== "sheet") render();
-      syncPopout();
-    });
+    subscribeSheetChange(storageId);
+
+    if (role === "GM") {
+      prefetchGmSlotNames();
+    }
 
     obr.onLogChange((updated) => {
       log = updated;
@@ -486,6 +602,8 @@ async function initEmbedded() {
         obr.grantLuckToken().then((granted) => {
           if (granted) handleRoll(buildTokenGrantLogEntry(playerName));
         });
+      } else if (msg.kind === "switch-gm-slot" && role === "GM") {
+        switchGmSlot(msg.slot);
       }
     });
   });
@@ -513,11 +631,14 @@ function initPopout() {
     // when the sheet itself actually changed - other tabs still refresh
     // normally since they don't hold that kind of transient state.
     const sheetChanged = JSON.stringify(sheet) !== JSON.stringify(msg.sheet);
+    const slotChanged = gmSlot !== (msg.gmSlot ?? 1);
     sheet = msg.sheet;
     log = msg.log;
     tokenPool = msg.tokenPool ?? defaultTokenPool();
     partyMembers = msg.partyMembers ?? [];
-    if (currentTab !== "sheet" || sheetChanged) render();
+    gmSlot = msg.gmSlot ?? 1;
+    gmSlotNames = msg.gmSlotNames ?? gmSlotNames;
+    if (currentTab !== "sheet" || sheetChanged || slotChanged) render();
   });
 
   render(); // show something immediately while we wait for state

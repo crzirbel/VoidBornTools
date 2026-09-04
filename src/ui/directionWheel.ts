@@ -8,6 +8,9 @@ const RADIUS = 100;
 const LABEL_RADIUS = 78;
 const NEEDLE_LENGTH = 88;
 const SECTOR_ANGLE = 360 / COMPASS_DIRECTIONS.length; // 22.5deg
+// Keep the landing point clear of the sector boundary lines so it's never
+// ambiguous which sector the needle is pointing into.
+const SECTOR_EDGE_MARGIN = SECTOR_ANGLE * 0.18;
 const SPIN_MS = 3200;
 const EXTRA_SPINS = 5;
 
@@ -38,15 +41,16 @@ function buildWheelSvg(): { svg: SVGSVGElement; needleGroup: SVGGElement } {
   svg.classList.add("direction-wheel-svg");
 
   // Static compass face - sectors and labels never move. Only the needle
-  // (added below) rotates to point at the result.
+  // (added below) rotates to point at the result. All-white sectors with
+  // black divider lines, matching the sheet's black/white aesthetic.
   COMPASS_DIRECTIONS.forEach((label, i) => {
     const startAngle = i * SECTOR_ANGLE;
     const endAngle = startAngle + SECTOR_ANGLE;
     const path = document.createElementNS(ns, "path");
     path.setAttribute("d", describeSectorPath(startAngle, endAngle));
-    path.setAttribute("fill", i % 2 === 0 ? "#ffffff" : "#111111");
+    path.setAttribute("fill", "#ffffff");
     path.setAttribute("stroke", "#111111");
-    path.setAttribute("stroke-width", "1");
+    path.setAttribute("stroke-width", "1.5");
     svg.appendChild(path);
 
     const centerAngle = startAngle + SECTOR_ANGLE / 2;
@@ -54,7 +58,7 @@ function buildWheelSvg(): { svg: SVGSVGElement; needleGroup: SVGGElement } {
     const text = document.createElementNS(ns, "text");
     text.setAttribute("x", pos.x.toFixed(2));
     text.setAttribute("y", pos.y.toFixed(2));
-    text.setAttribute("fill", i % 2 === 0 ? "#111111" : "#ffffff");
+    text.setAttribute("fill", "#111111");
     text.setAttribute("text-anchor", "middle");
     text.setAttribute("dominant-baseline", "middle");
     text.setAttribute("font-size", label.length > 2 ? "8" : "10");
@@ -77,7 +81,7 @@ function buildWheelSvg(): { svg: SVGSVGElement; needleGroup: SVGGElement } {
     "d",
     `M ${CENTER - 7} ${CENTER} L ${CENTER} ${needleTipY} L ${CENTER + 7} ${CENTER} Z`
   );
-  needle.setAttribute("fill", "#7a1f1f");
+  needle.setAttribute("fill", "#111111");
   needle.setAttribute("stroke", "#111111");
   needle.setAttribute("stroke-width", "1");
   needleGroup.appendChild(needle);
@@ -86,7 +90,7 @@ function buildWheelSvg(): { svg: SVGSVGElement; needleGroup: SVGGElement } {
   const tail = document.createElementNS(ns, "path");
   const tailY = CENTER + NEEDLE_LENGTH * 0.28;
   tail.setAttribute("d", `M ${CENTER - 4} ${CENTER} L ${CENTER} ${tailY} L ${CENTER + 4} ${CENTER} Z`);
-  tail.setAttribute("fill", "#3a3a3a");
+  tail.setAttribute("fill", "#111111");
   tail.setAttribute("stroke", "#111111");
   tail.setAttribute("stroke-width", "1");
   needleGroup.appendChild(tail);
@@ -98,8 +102,8 @@ function buildWheelSvg(): { svg: SVGSVGElement; needleGroup: SVGGElement } {
   hub.setAttribute("cx", String(CENTER));
   hub.setAttribute("cy", String(CENTER));
   hub.setAttribute("r", "8");
-  hub.setAttribute("fill", "#111111");
-  hub.setAttribute("stroke", "#7a1f1f");
+  hub.setAttribute("fill", "#ffffff");
+  hub.setAttribute("stroke", "#111111");
   hub.setAttribute("stroke-width", "1.5");
   svg.appendChild(hub);
 
@@ -149,7 +153,12 @@ export function buildDirectionWheelPanel(
     spinBtn.disabled = true;
 
     const result = rollDirection();
-    const targetAngle = result.index * SECTOR_ANGLE; // needle's resting angle, from top, clockwise
+    // Land at a random point inside the sector (not on its boundary line),
+    // so the needle doesn't always point at the same edge between two
+    // directions - keep a small margin from the edges so it's never
+    // ambiguous which sector it landed in.
+    const spread = SECTOR_ANGLE - 2 * SECTOR_EDGE_MARGIN;
+    const targetAngle = result.index * SECTOR_ANGLE + SECTOR_EDGE_MARGIN + Math.random() * spread;
     const currentMod = ((cumulativeRotation % 360) + 360) % 360;
     let delta = targetAngle - currentMod;
     if (delta <= 0) delta += 360;

@@ -9,8 +9,10 @@ const SHEET_PREFIX = `${ID}/sheet/`; // sheets live in ROOM metadata, one key pe
 const LEGACY_SHEET_KEY = `${ID}/sheet`; // old player-metadata location, pre-migration
 const LOG_KEY = `${ID}/log`;
 const TOKEN_POOL_KEY = `${ID}/tokens`;
+const GM_ACTIVE_SLOT_PREFIX = `${ID}/gmActiveSlot/`; // which of the 4 slots an Arbitrator last had open
 const ROLL_CHANNEL = `${ID}/roll-toast`;
 const MAX_LOG_ENTRIES = 30;
+export const GM_SLOT_COUNT = 4;
 
 // Owlbear room metadata has a documented 16kB TOTAL cap, shared by the Log,
 // the Token Pool, and every party member's sheet combined. Warn well before
@@ -25,6 +27,34 @@ function byteSize(value: unknown): number {
 
 function sheetKey(playerId: string): string {
   return `${SHEET_PREFIX}${playerId}`;
+}
+
+/**
+ * The Arbitrator's 4 sheet slots (for quickly toggling between NPC/enemy
+ * statblocks) reuse the exact same per-key sheet storage every player's
+ * sheet already uses - just under a synthetic "virtual player id" derived
+ * from the Arbitrator's real id plus a slot number, so loadSheet/saveSheet/
+ * onSheetChange/localBackup all work completely unchanged. These virtual
+ * ids never appear in OBR.party.getPlayers(), so getPartySheets() (used by
+ * the GM Roster) can never pick them up - they're invisible to everyone
+ * else by construction, not by a separate filter that could be forgotten.
+ */
+export function gmSlotStorageId(gmPlayerId: string, slot: number): string {
+  return `${gmPlayerId}::gmSlot${slot}`;
+}
+
+function gmActiveSlotKey(gmPlayerId: string): string {
+  return `${GM_ACTIVE_SLOT_PREFIX}${gmPlayerId}`;
+}
+
+export async function loadGmActiveSlot(gmPlayerId: string): Promise<number> {
+  const metadata = await OBR.room.getMetadata();
+  const raw = Number(metadata[gmActiveSlotKey(gmPlayerId)]);
+  return raw >= 1 && raw <= GM_SLOT_COUNT ? raw : 1;
+}
+
+export async function saveGmActiveSlot(gmPlayerId: string, slot: number): Promise<void> {
+  await OBR.room.setMetadata({ [gmActiveSlotKey(gmPlayerId)]: slot });
 }
 
 // Verbose, always-on diagnostic logging for the sheet save/load pipeline.
@@ -155,7 +185,7 @@ export async function getPlayerId(): Promise<string> {
  * party member's sheet combined - worth keeping an eye on for a large party
  * with heavily-loaded characters.
  */
-export async function loadSheet(playerId: string): Promise<CharacterSheet> {
+export async function loadSheet(playerId: string, checkLegacy = true): Promise<CharacterSheet> {
   logSheet("loadSheet: calling OBR.room.getMetadata()...");
   const metadata = await OBR.room.getMetadata();
   const raw = metadata[sheetKey(playerId)];
@@ -164,6 +194,15 @@ export async function loadSheet(playerId: string): Promise<CharacterSheet> {
     const result = migrateSheet(raw);
     logSheet("loadSheet: resolved to", summarize(result));
     return result;
+  }
+
+  if (!checkLegacy) {
+    // Used for the Arbitrator's slot-2/3/4 virtual ids: they never had
+    // legacy player-metadata data of their own, and the legacy key isn't
+    // per-slot, so falling through to it here would incorrectly carry the
+    // Arbitrator's old personal sheet into every empty slot.
+    logSheet("loadSheet: nothing in room metadata, skipping legacy check for this id - starting fresh");
+    return emptySheet();
   }
 
   // Nothing in the new room-metadata location yet - check the OLD

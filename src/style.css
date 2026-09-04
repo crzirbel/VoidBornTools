@@ -77,6 +77,43 @@ h2 {
   background: #000000;
 }
 
+.gm-slot-bar {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.gm-slot-btn {
+  flex: 1;
+  background: #ffffff;
+  border: 2px solid #000000;
+  color: var(--text-dim);
+  padding: 0.3rem 0.15rem;
+  cursor: pointer;
+  font-family: var(--font-heading);
+  text-align: center;
+}
+
+.gm-slot-btn.active {
+  color: #ffffff;
+  background: #000000;
+}
+
+.gm-slot-btn-num {
+  font-size: 0.85rem;
+}
+
+.gm-slot-btn-name {
+  font-family: var(--font-body);
+  font-size: 0.55rem;
+  text-transform: none;
+  letter-spacing: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 0.1rem;
+}
+
 .panel {
   background: #ffffff;
   border: 2px solid #000000;

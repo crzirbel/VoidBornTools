@@ -187,7 +187,7 @@ export function renderTables(
   panel.appendChild(grid);
   container.appendChild(panel);
 
-  container.appendChild(buildDirectionWheelPanel(playerName, onRoll));
-
   container.appendChild(buildDiceRollerPanel(playerName, onRoll));
+
+  container.appendChild(buildDirectionWheelPanel(playerName, onRoll));
 }
