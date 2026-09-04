@@ -5,6 +5,15 @@ type ChangelogEntry = {
 
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "v1.1",
+    notes: [
+      "Added an Inventory section below Wargear on the Sheet tab (same name/quantity/description structure as Wargear, for plain carried items)",
+      "Added Equipped checkboxes and an Effects editor to Wargear — armor, fields, and shields now grant real SAV/TGH bonuses while equipped (armor and fields don't stack with each other; shields always stack on top), and items like Holy Water, Laser Sight, and Hellfire Rounds apply their HIT/ATK bonuses automatically (the latter two link to a specific ranged weapon)",
+      "Added a Scatter Direction spinner wheel to the Tables tab for blast weapons and vehicle-damage-table ejections — spins and lands on one of the 16 compass points, posting the result to the shared Log",
+      "Fixed a bug where the DMG box could show 0 instead of the number of successful HITs — most noticeable on a popped-out sheet, where every roll synced back from the main window was silently resetting the in-progress attack",
+    ],
+  },
+  {
     version: "v1.0",
     notes: [
       "Added Luck & Chaos tokens (replaces the old Luck Coin) — 8 shared tokens that persist indefinitely; players spend Luck tokens (flipping them to Chaos) for ATK/Test bonuses, canceling a Critical Fail, or rerolling a Wound; the Arbitrator spends Chaos tokens (flipping them back to Luck) to force bad outcomes; a player can Burn a token permanently on a character's death, and the Arbitrator can Grant a Luck token back up to the max of 8",
