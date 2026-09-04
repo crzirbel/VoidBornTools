@@ -321,12 +321,6 @@ function render() {
   app.appendChild(content);
 
   if (currentTab === "sheet") {
-    // The Arbitrator's 4 quick-swap slots (for running multiple NPCs/
-    // enemies) only make sense on their own Sheet tab - players never see
-    // this, and it doesn't apply to any other tab.
-    if (role === "GM") {
-      content.appendChild(buildGmSlotBar());
-    }
     renderSheet(
       content,
       sheet,
@@ -340,6 +334,15 @@ function render() {
       },
       importSheet
     );
+    // The Arbitrator's 4 quick-swap slots (for running multiple NPCs/
+    // enemies) only make sense on their own Sheet tab - players never see
+    // this, and it doesn't apply to any other tab. Must be inserted AFTER
+    // renderSheet runs: renderSheet does container.innerHTML = "" as its
+    // first line (it owns and fully redraws its container), which would
+    // silently wipe out anything appended beforehand.
+    if (role === "GM") {
+      content.insertBefore(buildGmSlotBar(), content.firstChild);
+    }
   } else if (currentTab === "tables") {
     renderTables(content, sheet, playerName, handleRoll, {
       pool: tokenPool,
@@ -615,6 +618,14 @@ function initPopout() {
     return;
   }
 
+  // The very first "state" sync must always render, even if the sheet/slot
+  // it carries happens to match this window's placeholder defaults (e.g. a
+  // fresh, lightly-used sheet on slot 1) - otherwise role/playerName/tabs/
+  // the GM slot bar never get corrected from their initial "PLAYER"/blank
+  // placeholders, which is more than cosmetic: it silently hides the
+  // Roster tab, the slot bar, and Arbitrator-only buttons in the popout.
+  let hasReceivedInitialState = false;
+
   window.addEventListener("message", (event) => {
     if (event.source !== window.opener) return;
     const msg = event.data;
@@ -632,13 +643,15 @@ function initPopout() {
     // normally since they don't hold that kind of transient state.
     const sheetChanged = JSON.stringify(sheet) !== JSON.stringify(msg.sheet);
     const slotChanged = gmSlot !== (msg.gmSlot ?? 1);
+    const isFirstState = !hasReceivedInitialState;
+    hasReceivedInitialState = true;
     sheet = msg.sheet;
     log = msg.log;
     tokenPool = msg.tokenPool ?? defaultTokenPool();
     partyMembers = msg.partyMembers ?? [];
     gmSlot = msg.gmSlot ?? 1;
     gmSlotNames = msg.gmSlotNames ?? gmSlotNames;
-    if (currentTab !== "sheet" || sheetChanged || slotChanged) render();
+    if (isFirstState || currentTab !== "sheet" || sheetChanged || slotChanged) render();
   });
 
   render(); // show something immediately while we wait for state
