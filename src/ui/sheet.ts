@@ -2,13 +2,22 @@ import type {
   AbilityEffects,
   AbilityEntry,
   CharacterSheet,
+  InventoryEntry,
   RollLogEntry,
   TestAttribute,
   Weapon,
   WeaponKind,
+  WargearEffects,
   WargearEntry,
 } from "../types";
-import { emptyAbilityEffects, emptyWeapon, makeId } from "../types";
+import {
+  emptyAbilityEffects,
+  emptyInventoryEntry,
+  emptyWargearEntry,
+  emptyWeapon,
+  makeId,
+  wargearHasEffects,
+} from "../types";
 import { searchWeaponCatalog, weaponFromCatalog } from "../data/weapons";
 import { searchWargearCatalog, wargearFromCatalog } from "../data/wargear";
 import { searchAbilityCatalog, abilityFromCatalog } from "../data/abilities";
@@ -19,6 +28,7 @@ import { rollTest, buildTestLogEntry, buildAttackLogEntry, buildDamageLogEntry }
 import {
   computeBonuses,
   effectiveSav,
+  effectiveTgh,
   modifiersForKind,
   rollAttack,
   rollDamage,
@@ -31,6 +41,14 @@ import type { SituationalModifier } from "../combat";
 import { showResult } from "./result";
 
 let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+
+// Tracks the last "Hits: N" / pre-filled DMG dice count per weapon id,
+// outside of renderSheet's own closures, so it survives a full re-render of
+// the sheet tab that happens to land between a player's ATK roll and their
+// follow-up DMG roll (e.g. a popout sync, a tab switch and back). Without
+// this, any such re-render silently resets the DMG box back to 0 - which
+// was the root cause of "DMG box shows 0 after a successful HIT".
+const pendingHitsByWeaponId = new Map<string, number>();
 
 function debounceSave(sheet: CharacterSheet, onSave: (s: CharacterSheet) => void) {
   clearTimeout(debounceTimer);
@@ -222,6 +240,19 @@ export function renderSheet(
     { key: "sav", label: "SAV" },
   ];
 
+  let savNoteEl: HTMLDivElement | null = null;
+  let tghNoteEl: HTMLDivElement | null = null;
+  // SAV/TGH can be boosted by abilities or equipped wargear (Wary, Master
+  // Crafted, armor, fields, shields). Called whenever anything that could
+  // change those bonuses is edited - attribute inputs, and later, wargear
+  // equip checkboxes / effect fields - so the "eff. N" note stays current
+  // without needing a full renderSheet() re-render.
+  function refreshBonusNotes() {
+    const bonuses = computeBonuses(sheet);
+    if (savNoteEl) savNoteEl.textContent = bonuses.savBonus !== 0 ? `eff. ${effectiveSav(sheet, bonuses)}` : "";
+    if (tghNoteEl) tghNoteEl.textContent = bonuses.tghBonus !== 0 ? `eff. ${effectiveTgh(sheet, bonuses)}` : "";
+  }
+
   for (const attr of attrs) {
     const box = document.createElement("div");
     box.className = "attr-box";
@@ -237,22 +268,19 @@ export function renderSheet(
     input.addEventListener("input", () => {
       (sheet as any)[attr.key] = Number(input.value) || 0;
       debounceSave(sheet, onSave);
-      if (attr.key === "sav") updateSavNote?.();
+      refreshBonusNotes();
     });
     box.appendChild(input);
 
-    // SAV can be boosted by abilities (Wary, Master Crafted) - show the
-    // effective total when a bonus is active.
-    let updateSavNote: (() => void) | null = null;
     if (attr.key === "sav") {
-      const savNote = document.createElement("div");
-      savNote.className = "attr-sub-note";
-      box.appendChild(savNote);
-      updateSavNote = () => {
-        const bonuses = computeBonuses(sheet);
-        savNote.textContent = bonuses.savBonus !== 0 ? `eff. ${effectiveSav(sheet, bonuses)}` : "";
-      };
-      updateSavNote();
+      savNoteEl = document.createElement("div");
+      savNoteEl.className = "attr-sub-note";
+      box.appendChild(savNoteEl);
+    }
+    if (attr.key === "tgh") {
+      tghNoteEl = document.createElement("div");
+      tghNoteEl.className = "attr-sub-note";
+      box.appendChild(tghNoteEl);
     }
 
     if (locked) {
@@ -290,6 +318,7 @@ export function renderSheet(
 
   attrPanel.appendChild(attrGrid);
   container.appendChild(attrPanel);
+  refreshBonusNotes();
 
   // Species / Trait / Past / Trinket
   const bgPanel = document.createElement("div");
@@ -472,6 +501,7 @@ export function renderSheet(
       delBtn.textContent = "✕";
       delBtn.addEventListener("click", () => {
         sheet.weapons = sheet.weapons.filter((w) => w.id !== weapon.id);
+        pendingHitsByWeaponId.delete(weapon.id);
         onSave(sheet);
         renderWeapons();
       });
@@ -597,15 +627,20 @@ export function renderSheet(
       const combatRow = document.createElement("div");
       combatRow.className = "weapon-combat-row";
 
+      // Rehydrate from the last ATK roll for this weapon, if any survived
+      // (see pendingHitsByWeaponId comment above) - otherwise start blank.
+      const pendingHits = pendingHitsByWeaponId.get(weapon.id);
+
       hitsLabel = document.createElement("span");
       hitsLabel.className = "meta";
-      hitsLabel.textContent = "Hits: —";
+      hitsLabel.textContent = pendingHits !== undefined ? `Hits: ${pendingHits}` : "Hits: —";
       combatRow.appendChild(hitsLabel);
 
       dmgCountInput = document.createElement("input");
       dmgCountInput.type = "number";
       dmgCountInput.min = "0";
-      dmgCountInput.value = "0";
+      dmgCountInput.value =
+        pendingHits !== undefined ? String(weaponDamageDiceCount(pendingHits, weapon)) : "0";
       dmgCountInput.title = "Number of DMG dice to roll - defaults to hits (plus any Extra DMG Dice/Hit effect), adjust if some were saved against";
       combatRow.appendChild(dmgCountInput);
 
@@ -621,6 +656,12 @@ export function renderSheet(
         const dmg = rollDamage(n, dmgTarget);
         const entry = buildDamageLogEntry(playerName, `${weapon.name || "Weapon"} DMG`, dmg);
         onRoll(entry);
+
+        // DMG has been rolled for this attack - clear the pending hits so a
+        // later re-render doesn't keep offering the same stale dice count.
+        pendingHitsByWeaponId.delete(weapon.id);
+        if (hitsLabel) hitsLabel.textContent = "Hits: —";
+        dmgCountInput!.value = "0";
       });
       combatRow.appendChild(dmgRollBtn);
 
@@ -650,6 +691,7 @@ export function renderSheet(
         onRoll(entry);
         resetModifierChecks();
 
+        pendingHitsByWeaponId.set(weapon.id, atk.hits);
         if (hitsLabel) hitsLabel.textContent = `Hits: ${atk.hits}`;
         if (dmgCountInput) dmgCountInput.value = String(weaponDamageDiceCount(atk.hits, weapon));
       });
@@ -1070,6 +1112,125 @@ export function renderSheet(
     }
     block.appendChild(topRow);
 
+    // Equip toggle - equipping/unequipping adds or removes this item's
+    // effects (if any) from the sheet's math immediately.
+    const equipRow = document.createElement("label");
+    equipRow.className = "wargear-equip-row";
+    const equipCheckbox = document.createElement("input");
+    equipCheckbox.type = "checkbox";
+    equipCheckbox.checked = item.equipped;
+    // Equipping/unequipping is allowed in both locked (play) and unlocked
+    // (edit) modes, unlike name/qty/description which need Edit mode.
+    equipCheckbox.addEventListener("change", () => {
+      item.equipped = equipCheckbox.checked;
+      onSave(sheet);
+      refreshBonusNotes();
+    });
+    equipRow.appendChild(equipCheckbox);
+    equipRow.appendChild(document.createTextNode("Equipped"));
+    block.appendChild(equipRow);
+
+    // Effects editor - only editable while unlocked, same pattern as
+    // Ability effects. Most catalog wargear is flavor-only; this is hidden
+    // unless the item actually needs to move the sheet's math.
+    if (!locked) {
+      const hasEffects = wargearHasEffects(item.effects);
+      const toggleBtn = document.createElement("button");
+      toggleBtn.className = "btn secondary small";
+      toggleBtn.style.marginTop = "0.3rem";
+      toggleBtn.textContent = hasEffects ? "Effects (set)" : "+ Effects";
+      const effectsBox = document.createElement("div");
+      effectsBox.className = "effects-box";
+      effectsBox.style.display = hasEffects ? "block" : "none";
+      toggleBtn.addEventListener("click", () => {
+        effectsBox.style.display = effectsBox.style.display === "none" ? "block" : "none";
+      });
+      block.appendChild(toggleBtn);
+      block.appendChild(effectsBox);
+
+      const numberFields: { key: keyof WargearEffects; label: string; title?: string }[] = [
+        { key: "meleeHitBonus", label: "Melee HIT Bonus (all melee weapons)", title: "e.g. Holy Water: +1 to HIT for melee weapon" },
+        { key: "rangedHitBonus", label: "Ranged HIT Bonus (linked weapon)", title: "e.g. Laser Sight: +1 HIT for a ranged weapon - pick which weapon below" },
+        { key: "rangedAtkBonus", label: "Ranged ATK Dice (linked weapon)", title: "e.g. Hellfire Rounds: +1D10 ATK to a ranged weapon - pick which weapon below" },
+        { key: "savBonus", label: "SAV Bonus" },
+        { key: "tghBonus", label: "TGH Bonus" },
+      ];
+      const effGrid = document.createElement("div");
+      effGrid.className = "field-row";
+      for (const f of numberFields) {
+        const wrap = document.createElement("div");
+        const label = document.createElement("label");
+        label.textContent = f.label;
+        if (f.title) label.title = f.title;
+        wrap.appendChild(label);
+        const numInput = document.createElement("input");
+        numInput.type = "number";
+        numInput.value = String(item.effects[f.key] ?? 0);
+        numInput.addEventListener("input", () => {
+          (item.effects as any)[f.key] = Number(numInput.value) || 0;
+          debounceSave(sheet, onSave);
+          refreshBonusNotes();
+        });
+        wrap.appendChild(numInput);
+        effGrid.appendChild(wrap);
+      }
+      effectsBox.appendChild(effGrid);
+
+      // SAV stacking category - only matters when savBonus is set.
+      const categoryWrap = document.createElement("div");
+      const categoryLabel = document.createElement("label");
+      categoryLabel.textContent = "SAV Type";
+      categoryLabel.title = "Armor/Fields: only the single best equipped source applies. Shield: always stacks on top.";
+      categoryWrap.appendChild(categoryLabel);
+      const categorySelect = document.createElement("select");
+      const catOptions: { value: WargearEffects["savCategory"]; label: string }[] = [
+        { value: "armorOrField", label: "Armor / Field (doesn't stack with other armor/fields)" },
+        { value: "shield", label: "Shield (stacks with armor/fields)" },
+      ];
+      for (const opt of catOptions) {
+        const o = document.createElement("option");
+        o.value = opt.value;
+        o.textContent = opt.label;
+        if (item.effects.savCategory === opt.value) o.selected = true;
+        categorySelect.appendChild(o);
+      }
+      categorySelect.addEventListener("change", () => {
+        item.effects.savCategory = categorySelect.value as WargearEffects["savCategory"];
+        debounceSave(sheet, onSave);
+        refreshBonusNotes();
+      });
+      categoryWrap.appendChild(categorySelect);
+      effectsBox.appendChild(categoryWrap);
+
+      // Linked weapon - only relevant for rangedHitBonus/rangedAtkBonus,
+      // since those are worded "for A weapon" rather than sheet-wide.
+      const linkWrap = document.createElement("div");
+      linkWrap.style.marginTop = "0.3rem";
+      const linkLabel = document.createElement("label");
+      linkLabel.textContent = "Linked Ranged Weapon";
+      linkLabel.title = "Which specific ranged weapon the Ranged HIT/ATK bonus above applies to.";
+      linkWrap.appendChild(linkLabel);
+      const linkSelect = document.createElement("select");
+      const noneOpt = document.createElement("option");
+      noneOpt.value = "";
+      noneOpt.textContent = "— None —";
+      linkSelect.appendChild(noneOpt);
+      for (const w of sheet.weapons.filter((w) => w.kind === "ranged")) {
+        const o = document.createElement("option");
+        o.value = w.id;
+        o.textContent = w.name || "(unnamed ranged weapon)";
+        if (item.effects.linkedWeaponId === w.id) o.selected = true;
+        linkSelect.appendChild(o);
+      }
+      linkSelect.addEventListener("change", () => {
+        item.effects.linkedWeaponId = linkSelect.value;
+        debounceSave(sheet, onSave);
+        refreshBonusNotes();
+      });
+      linkWrap.appendChild(linkSelect);
+      effectsBox.appendChild(linkWrap);
+    }
+
     return block;
   }
 
@@ -1085,7 +1246,7 @@ export function renderSheet(
     addWargearBtn.className = "btn secondary small";
     addWargearBtn.textContent = "+ Add Blank Wargear";
     addWargearBtn.addEventListener("click", () => {
-      sheet.wargear.push({ id: makeId("wg"), name: "", quantity: 1, description: "" });
+      sheet.wargear.push(emptyWargearEntry());
       onSave(sheet);
       renderWargear();
     });
@@ -1148,6 +1309,104 @@ export function renderSheet(
   }
 
   container.appendChild(wargearPanel);
+
+  // Inventory (same three-box shape as Wargear - name + quantity +
+  // description - but plain carried items, no equip toggle or effects).
+  const inventoryPanel = document.createElement("div");
+  inventoryPanel.className = "panel";
+  inventoryPanel.appendChild(sectionTitle("Inventory"));
+  const inventoryList = document.createElement("div");
+  inventoryPanel.appendChild(inventoryList);
+
+  function renderInventory() {
+    inventoryList.innerHTML = "";
+    if (sheet.inventory.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "empty-state";
+      empty.textContent = "No inventory yet.";
+      inventoryList.appendChild(empty);
+    }
+    for (const item of sheet.inventory) {
+      inventoryList.appendChild(renderInventoryItem(item));
+    }
+  }
+
+  function renderInventoryItem(item: InventoryEntry): HTMLElement {
+    const block = document.createElement("div");
+    block.className = "list-item";
+
+    const topRow = document.createElement("div");
+    topRow.className = "list-item-top";
+
+    const nameInput = document.createElement("input");
+    nameInput.type = "text";
+    nameInput.placeholder = "Item name";
+    nameInput.value = item.name;
+    nameInput.disabled = locked;
+    nameInput.className = "list-item-name";
+    nameInput.addEventListener("input", () => {
+      item.name = nameInput.value;
+      debounceSave(sheet, onSave);
+    });
+    topRow.appendChild(nameInput);
+
+    const qtyInput = document.createElement("input");
+    qtyInput.type = "number";
+    qtyInput.min = "0";
+    qtyInput.value = String(item.quantity);
+    qtyInput.disabled = locked;
+    qtyInput.className = "list-item-qty";
+    qtyInput.title = "Quantity";
+    qtyInput.addEventListener("input", () => {
+      item.quantity = Number(qtyInput.value) || 0;
+      debounceSave(sheet, onSave);
+    });
+    topRow.appendChild(qtyInput);
+
+    const descInput = document.createElement("input");
+    descInput.type = "text";
+    descInput.placeholder = "Description";
+    descInput.value = item.description;
+    descInput.disabled = locked;
+    descInput.className = "list-item-desc";
+    descInput.addEventListener("input", () => {
+      item.description = descInput.value;
+      debounceSave(sheet, onSave);
+    });
+    topRow.appendChild(descInput);
+
+    if (!locked) {
+      const delBtn = document.createElement("button");
+      delBtn.className = "btn small danger";
+      delBtn.textContent = "✕";
+      delBtn.addEventListener("click", () => {
+        sheet.inventory = sheet.inventory.filter((i) => i.id !== item.id);
+        onSave(sheet);
+        renderInventory();
+      });
+      topRow.appendChild(delBtn);
+    }
+    block.appendChild(topRow);
+
+    return block;
+  }
+
+  renderInventory();
+
+  if (!locked) {
+    const addInventoryBtn = document.createElement("button");
+    addInventoryBtn.className = "btn secondary small";
+    addInventoryBtn.style.marginTop = "0.4rem";
+    addInventoryBtn.textContent = "+ Add Inventory Item";
+    addInventoryBtn.addEventListener("click", () => {
+      sheet.inventory.push(emptyInventoryEntry());
+      onSave(sheet);
+      renderInventory();
+    });
+    inventoryPanel.appendChild(addInventoryBtn);
+  }
+
+  container.appendChild(inventoryPanel);
 
   // Injuries / Corruption
   const injuryPanel = document.createElement("div");

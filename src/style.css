@@ -479,6 +479,43 @@ textarea {
   width: 3rem;
 }
 
+.direction-wheel-wrap {
+  display: flex;
+  justify-content: center;
+  margin: 0.25rem 0 0.5rem;
+}
+
+.direction-wheel-svg {
+  width: 100%;
+  max-width: 260px;
+}
+
+.direction-wheel-result {
+  text-align: center;
+  font-family: var(--font-heading);
+  font-size: 1rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: 0.5rem;
+}
+
+.wargear-equip-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.3rem;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.wargear-equip-row input {
+  width: auto;
+  margin: 0;
+}
+
 .btn {
   background: #000000;
   color: #ffffff;

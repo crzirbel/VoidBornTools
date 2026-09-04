@@ -78,11 +78,83 @@ export interface AbilityEntry {
   effects: AbilityEffects;
 }
 
+// Mechanical modifiers a piece of wargear grants while equipped. Most
+// catalog wargear is flavor-only (empty effects); only items that actually
+// move the sheet's math (armor, fields, shields, Holy Water, Laser Sight,
+// Hellfire Rounds, etc.) need these set.
+export interface WargearEffects {
+  // Applies to every melee weapon while equipped (e.g. Holy Water).
+  meleeHitBonus: number;
+  // Applies only to the single ranged weapon referenced by linkedWeaponId
+  // (e.g. Laser Sight, Hellfire Rounds - both are worded "for A weapon").
+  rangedHitBonus: number;
+  rangedAtkBonus: number;
+  // SAV granted by this item. savCategory controls how it stacks with
+  // other equipped SAV sources: "armorOrField" sources don't stack with
+  // each other (only the single best applies), while "shield" sources
+  // always stack on top of whichever armor/field is equipped.
+  savBonus: number;
+  savCategory: "armorOrField" | "shield";
+  tghBonus: number;
+  // Which weapon (by id) this item's ranged bonuses are attached to, for
+  // effects that must be linked to one specific weapon rather than applying
+  // sheet-wide. Ignored unless rangedHitBonus/rangedAtkBonus is non-zero.
+  linkedWeaponId: string;
+}
+
+export function emptyWargearEffects(): WargearEffects {
+  return {
+    meleeHitBonus: 0,
+    rangedHitBonus: 0,
+    rangedAtkBonus: 0,
+    savBonus: 0,
+    savCategory: "armorOrField",
+    tghBonus: 0,
+    linkedWeaponId: "",
+  };
+}
+
+export function wargearHasEffects(e: WargearEffects): boolean {
+  return (
+    e.meleeHitBonus !== 0 ||
+    e.rangedHitBonus !== 0 ||
+    e.rangedAtkBonus !== 0 ||
+    e.savBonus !== 0 ||
+    e.tghBonus !== 0
+  );
+}
+
 export interface WargearEntry {
   id: string;
   name: string;
   quantity: number;
   description: string;
+  equipped: boolean;
+  effects: WargearEffects;
+}
+
+export function emptyWargearEntry(): WargearEntry {
+  return {
+    id: makeId("wg"),
+    name: "",
+    quantity: 1,
+    description: "",
+    equipped: false,
+    effects: emptyWargearEffects(),
+  };
+}
+
+// Inventory uses the same shape as Wargear (name/quantity/description) but
+// is never equippable and never carries effects - plain carried items.
+export interface InventoryEntry {
+  id: string;
+  name: string;
+  quantity: number;
+  description: string;
+}
+
+export function emptyInventoryEntry(): InventoryEntry {
+  return { id: makeId("inv"), name: "", quantity: 1, description: "" };
 }
 
 export interface CharacterSheet {
@@ -105,6 +177,7 @@ export interface CharacterSheet {
   bonds: string;
   abilities: AbilityEntry[];
   wargear: WargearEntry[];
+  inventory: InventoryEntry[];
   gold: number;
   weapons: Weapon[];
   // Stamped fresh on every save. Used to reject stale metadata echoes from
@@ -136,6 +209,7 @@ export function emptySheet(name = "New Colonist"): CharacterSheet {
     bonds: "",
     abilities: [],
     wargear: [],
+    inventory: [],
     gold: 50,
     weapons: [],
     updatedAt: 0,
