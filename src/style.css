@@ -134,6 +134,23 @@ h2 {
   margin-bottom: 0 !important;
 }
 
+.sav-override-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.15rem;
+  margin-top: 0.1rem;
+  font-size: 0.55rem;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.sav-override-row input {
+  width: auto;
+  height: 0.65rem;
+  margin: 0;
+}
+
 .attr-sub-note {
   font-size: 0.55rem;
   color: var(--text-dim);

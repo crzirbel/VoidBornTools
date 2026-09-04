@@ -1,5 +1,6 @@
 import html2canvas from "html2canvas";
 import type { CharacterSheet } from "./types";
+import { computeBonuses, effectiveSav } from "./combat";
 
 const HEADING_FONT = '"Black Ops One", "Arial Narrow", sans-serif';
 const BODY_FONT = '"Special Elite", "Courier New", monospace';
@@ -72,7 +73,10 @@ function buildExportLayout(sheet: CharacterSheet): HTMLElement {
   for (const a of attrs) {
     const cell = el("div", { flex: "1", border: "1px solid #000000", textAlign: "center", padding: "6px 0" });
     cell.appendChild(el("div", { fontFamily: HEADING_FONT, fontSize: "10px", color: "#555555" }, a.label));
-    cell.appendChild(el("div", { fontSize: "18px" }, String(sheet[a.key])));
+    // SAV has no base value - always show the computed total, not the raw
+    // (usually 0/unused) sheet.sav field.
+    const value = a.key === "sav" ? effectiveSav(sheet, computeBonuses(sheet)) : sheet[a.key];
+    cell.appendChild(el("div", { fontSize: "18px" }, String(value)));
     attrGrid.appendChild(cell);
   }
   attrBox.appendChild(attrGrid);

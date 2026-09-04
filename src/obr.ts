@@ -82,6 +82,16 @@ export function migrateSheet(stored: unknown): CharacterSheet {
 
   if (!Array.isArray(merged.inventory)) merged.inventory = [];
 
+  // SAV used to be a manually-typed base stat like the other attributes.
+  // It's now purely computed from equipped armor/field/shield (plus the
+  // rare ability), so any pre-existing value is discarded unless the sheet
+  // already has an explicit override flag set to true (i.e. was saved by
+  // this version of the app with the Arbitrator intentionally overriding it).
+  if ((stored as any).savOverride !== true) {
+    merged.savOverride = false;
+    merged.sav = 0;
+  }
+
   if (!Array.isArray(merged.weapons)) {
     merged.weapons = [];
   } else {

@@ -1,6 +1,7 @@
 import type { PartyMember } from "../obr";
 import type { CharacterSheet } from "../types";
 import { exportSheetJsonViaNewTab } from "../jsonio";
+import { computeBonuses, effectiveSav } from "../combat";
 
 export function renderRoster(container: HTMLElement, members: PartyMember[]) {
   container.innerHTML = "";
@@ -142,7 +143,10 @@ function renderSheetSummary(sheet: CharacterSheet | null): HTMLElement {
     l.className = "roster-attr-cell-label";
     l.textContent = a.label;
     cell.appendChild(l);
-    cell.appendChild(document.createTextNode(String(sheet[a.key])));
+    // SAV has no base value - always show the computed total, not the raw
+    // (usually 0/unused) sheet.sav field.
+    const value = a.key === "sav" ? effectiveSav(sheet, computeBonuses(sheet)) : sheet[a.key];
+    cell.appendChild(document.createTextNode(String(value)));
     attrRow.appendChild(cell);
   }
   box.appendChild(attrRow);

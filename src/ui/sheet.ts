@@ -240,17 +240,16 @@ export function renderSheet(
     { key: "sav", label: "SAV" },
   ];
 
-  let savNoteEl: HTMLDivElement | null = null;
   let tghNoteEl: HTMLDivElement | null = null;
-  // SAV/TGH can be boosted by abilities or equipped wargear (Wary, Master
-  // Crafted, armor, fields, shields). Called whenever anything that could
-  // change those bonuses is edited - attribute inputs, and later, wargear
-  // equip checkboxes / effect fields - so the "eff. N" note stays current
-  // without needing a full renderSheet() re-render.
+  let savInputEl: HTMLInputElement | null = null;
+  // TGH can be boosted by abilities or equipped wargear (Storm Shield).
+  // SAV has no base value at all - refreshSavDisplay() keeps its box in
+  // sync with the computed total whenever equip state changes elsewhere
+  // (e.g. the Wargear panel), unless the Arbitrator has it overridden.
   function refreshBonusNotes() {
     const bonuses = computeBonuses(sheet);
-    if (savNoteEl) savNoteEl.textContent = bonuses.savBonus !== 0 ? `eff. ${effectiveSav(sheet, bonuses)}` : "";
     if (tghNoteEl) tghNoteEl.textContent = bonuses.tghBonus !== 0 ? `eff. ${effectiveTgh(sheet, bonuses)}` : "";
+    if (savInputEl && !sheet.savOverride) savInputEl.value = String(bonuses.savBonus);
   }
 
   for (const attr of attrs) {
@@ -263,20 +262,55 @@ export function renderSheet(
 
     const input = document.createElement("input");
     input.type = "number";
-    input.value = String(sheet[attr.key]);
-    input.disabled = locked;
-    input.addEventListener("input", () => {
-      (sheet as any)[attr.key] = Number(input.value) || 0;
-      debounceSave(sheet, onSave);
-      refreshBonusNotes();
-    });
+    if (attr.key === "sav") {
+      savInputEl = input;
+      const bonuses = computeBonuses(sheet);
+      input.value = String(sheet.savOverride ? sheet.sav : bonuses.savBonus);
+      // SAV is auto-computed and never has a species/base value, so it's
+      // only editable when the Arbitrator has explicitly turned on the
+      // override below - locked or not doesn't matter on its own.
+      input.disabled = locked || !sheet.savOverride;
+      input.addEventListener("input", () => {
+        sheet.sav = Number(input.value) || 0;
+        debounceSave(sheet, onSave);
+      });
+    } else {
+      input.value = String(sheet[attr.key]);
+      input.disabled = locked;
+      input.addEventListener("input", () => {
+        (sheet as any)[attr.key] = Number(input.value) || 0;
+        debounceSave(sheet, onSave);
+        refreshBonusNotes();
+      });
+    }
     box.appendChild(input);
 
-    if (attr.key === "sav") {
-      savNoteEl = document.createElement("div");
-      savNoteEl.className = "attr-sub-note";
-      box.appendChild(savNoteEl);
+    if (attr.key === "sav" && !locked) {
+      const overrideRow = document.createElement("label");
+      overrideRow.className = "sav-override-row";
+      overrideRow.title = "SAV is normally auto-set from equipped armor/field/shield. Turn this on to type a manual value instead (e.g. a custom NPC template).";
+      const overrideCheckbox = document.createElement("input");
+      overrideCheckbox.type = "checkbox";
+      overrideCheckbox.checked = sheet.savOverride;
+      overrideCheckbox.addEventListener("change", () => {
+        sheet.savOverride = overrideCheckbox.checked;
+        const bonuses = computeBonuses(sheet);
+        if (sheet.savOverride) {
+          // Prefill the override with the current computed total as a
+          // sensible starting point rather than snapping to 0.
+          sheet.sav = bonuses.savBonus;
+        } else {
+          sheet.sav = 0;
+        }
+        onSave(sheet);
+        input.disabled = locked || !sheet.savOverride;
+        input.value = String(sheet.savOverride ? sheet.sav : bonuses.savBonus);
+      });
+      overrideRow.appendChild(overrideCheckbox);
+      overrideRow.appendChild(document.createTextNode("Ovr"));
+      box.appendChild(overrideRow);
     }
+
     if (attr.key === "tgh") {
       tghNoteEl = document.createElement("div");
       tghNoteEl.className = "attr-sub-note";

@@ -9,7 +9,8 @@ const CHANGELOG: ChangelogEntry[] = [
     notes: [
       "Added an Inventory section below Wargear on the Sheet tab (same name/quantity/description structure as Wargear, for plain carried items)",
       "Added Equipped checkboxes and an Effects editor to Wargear — armor, fields, and shields now grant real SAV/TGH bonuses while equipped (armor and fields don't stack with each other; shields always stack on top), and items like Holy Water, Laser Sight, and Hellfire Rounds apply their HIT/ATK bonuses automatically (the latter two link to a specific ranged weapon)",
-      "Added a Scatter Direction spinner wheel to the Tables tab for blast weapons and vehicle-damage-table ejections — spins and lands on one of the 16 compass points, posting the result to the shared Log",
+      "Added a Scatter Direction spinner wheel to the Tables tab for blast weapons and vehicle-damage-table ejections — a static compass face with a spinning center needle, holds on the last result until you spin again",
+      "The SAV box on the Sheet tab is now auto-set from equipped armor/field/shield (plus the rare ability like Wary) instead of being a manually-typed base stat — an \"Ovr\" checkbox in Edit mode lets the Arbitrator type a manual override when needed (e.g. a custom NPC template)",
       "Fixed a bug where the DMG box could show 0 instead of the number of successful HITs — most noticeable on a popped-out sheet, where every roll synced back from the main window was silently resetting the in-progress attack",
     ],
   },

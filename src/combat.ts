@@ -129,12 +129,17 @@ export function weaponHitTarget(
   return base + abilityBonus + wargearHitBonus + weapon.hitBonus;
 }
 
-/** Effective SAV = base stat + ability/wargear bonuses (e.g. Wary, equipped armor). */
+/**
+ * SAV has no base/species value - it's purely the computed total from
+ * equipped armor/field/shield (plus the rare ability like Wary), unless the
+ * Arbitrator has set a manual override for this sheet, in which case that
+ * override REPLACES the computed total rather than adding to it.
+ */
 export function effectiveSav(
   sheet: CharacterSheet,
   bonuses: ComputedBonuses = computeBonuses(sheet)
 ): number {
-  return sheet.sav + bonuses.savBonus;
+  return sheet.savOverride ? sheet.sav : bonuses.savBonus;
 }
 
 /** Effective TGH = base stat + ability/wargear bonuses (e.g. equipped Storm Shield). */

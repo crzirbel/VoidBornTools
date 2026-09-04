@@ -168,6 +168,12 @@ export interface CharacterSheet {
   wil: number;
   prs: number;
   sav: number;
+  // SAV has no base/species value - it's purely derived from equipped
+  // armor/field/shield (plus the rare ability like Wary). savOverride lets
+  // an Arbitrator type an explicit total instead (e.g. a custom NPC
+  // template) - when false, `sav` is ignored and the computed total is
+  // shown/used everywhere instead.
+  savOverride: boolean;
   fgt: number; // Fight dice: number of D10s rolled for melee ATK by default
   species: string;
   trait: string;
@@ -200,6 +206,7 @@ export function emptySheet(name = "New Colonist"): CharacterSheet {
     wil: 3,
     prs: 3,
     sav: 0,
+    savOverride: false,
     fgt: 1,
     species: "",
     trait: "",
