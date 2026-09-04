@@ -13,6 +13,35 @@ export function rollD10(): number {
 }
 
 /** Rolls a D100 as two D10s (tens, units), matching tabletop percentile convention. */
+// 16-point compass, clockwise from N. Used for blast scatter and events
+// like a vehicle-damage-table ejection that need a random direction.
+export const COMPASS_DIRECTIONS = [
+  "N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
+  "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW",
+] as const;
+
+export interface DirectionResult {
+  index: number; // 0-15, clockwise from N - matches COMPASS_DIRECTIONS
+  label: string;
+}
+
+export function rollDirection(): DirectionResult {
+  const index = Math.floor(Math.random() * COMPASS_DIRECTIONS.length);
+  return { index, label: COMPASS_DIRECTIONS[index] };
+}
+
+export function buildDirectionLogEntry(playerName: string, result: DirectionResult): RollLogEntry {
+  return {
+    id: makeLogId(),
+    playerName,
+    label: "Scatter Direction",
+    dice: [],
+    outcome: "info",
+    detail: `Direction: ${result.label}`,
+    timestamp: Date.now(),
+  };
+}
+
 export function rollD100(): number {
   const tens = rollD10();
   const units = rollD10();

@@ -11,6 +11,7 @@ import type { FreeDieSize } from "../dice";
 import type { CharacterSheet, RollLogEntry } from "../types";
 import { renderTokenPool } from "./tokens";
 import type { TokenPoolProps } from "./tokens";
+import { buildDirectionWheelPanel } from "./directionWheel";
 
 const FREE_DIE_SIZES: FreeDieSize[] = [4, 6, 8, 10, 12, 20, 100];
 
@@ -185,6 +186,8 @@ export function renderTables(
 
   panel.appendChild(grid);
   container.appendChild(panel);
+
+  container.appendChild(buildDirectionWheelPanel(playerName, onRoll));
 
   container.appendChild(buildDiceRollerPanel(playerName, onRoll));
 }
