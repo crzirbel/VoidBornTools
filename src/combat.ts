@@ -8,11 +8,19 @@ export interface ComputedBonuses {
   rangedHitBonus: number;
   dmgBonus: number;
   savBonus: number;
+  tghBonus: number;
   critThreshold: number;
   rerollRangedCritFail: boolean;
 }
 
-/** Sums the automatic effects of every ability on the sheet (abilities are always active once added - no equip toggle for them). */
+/**
+ * Sums the automatic effects of every ability (always active once added -
+ * no equip toggle for those) plus every *equipped* wargear item's effects.
+ *
+ * SAV from wargear stacks per the game's rule: armor and fields don't stack
+ * with each other (only the single highest "armorOrField" SAV source
+ * applies), but shields always stack on top of that.
+ */
 export function computeBonuses(sheet: CharacterSheet): ComputedBonuses {
   const totals: ComputedBonuses = {
     meleeAtkBonus: 0,
@@ -21,6 +29,7 @@ export function computeBonuses(sheet: CharacterSheet): ComputedBonuses {
     rangedHitBonus: 0,
     dmgBonus: 0,
     savBonus: 0,
+    tghBonus: 0,
     critThreshold: 1,
     rerollRangedCritFail: false,
   };
@@ -38,7 +47,48 @@ export function computeBonuses(sheet: CharacterSheet): ComputedBonuses {
     totals.rerollRangedCritFail = totals.rerollRangedCritFail || !!e.rerollRangedCritFail;
   }
 
+  let bestArmorOrFieldSav = 0;
+  let shieldSavTotal = 0;
+  for (const item of sheet.wargear ?? []) {
+    if (!item.equipped || !item.effects) continue;
+    const e = item.effects;
+    // Sheet-wide bonuses (not tied to a specific weapon).
+    totals.meleeHitBonus += e.meleeHitBonus || 0;
+    totals.tghBonus += e.tghBonus || 0;
+    if (e.savCategory === "shield") {
+      shieldSavTotal += e.savBonus || 0;
+    } else {
+      bestArmorOrFieldSav = Math.max(bestArmorOrFieldSav, e.savBonus || 0);
+    }
+    // rangedHitBonus/rangedAtkBonus are weapon-linked (Laser Sight, Hellfire
+    // Rounds) and applied per-weapon in weaponHitTarget/weaponAtkDiceCount
+    // below - not folded into the sheet-wide totals here.
+  }
+  totals.savBonus += bestArmorOrFieldSav + shieldSavTotal;
+
   return totals;
+}
+
+/**
+ * Sums the ranged HIT/ATK bonuses from equipped wargear that's specifically
+ * linked to this weapon (Laser Sight, Hellfire Rounds, etc. - each is worded
+ * "for A weapon", so it only applies to whichever one it's attached to).
+ */
+export function wargearBonusForWeapon(
+  sheet: CharacterSheet,
+  weapon: Weapon
+): { hitBonus: number; atkBonus: number } {
+  let hitBonus = 0;
+  let atkBonus = 0;
+  if (weapon.kind === "ranged") {
+    for (const item of sheet.wargear ?? []) {
+      if (!item.equipped || !item.effects) continue;
+      if (item.effects.linkedWeaponId !== weapon.id) continue;
+      hitBonus += item.effects.rangedHitBonus || 0;
+      atkBonus += item.effects.rangedAtkBonus || 0;
+    }
+  }
+  return { hitBonus, atkBonus };
 }
 
 /**
@@ -53,10 +103,11 @@ export function weaponAtkDiceCount(
   weapon: Weapon,
   bonuses: ComputedBonuses = computeBonuses(sheet)
 ): number {
+  const wargearAtkBonus = wargearBonusForWeapon(sheet, weapon).atkBonus;
   const count =
     weapon.kind === "melee"
       ? sheet.fgt + bonuses.meleeAtkBonus + weapon.baseDice + weapon.atkBonus
-      : weapon.baseDice + bonuses.rangedAtkBonus + weapon.atkBonus;
+      : weapon.baseDice + bonuses.rangedAtkBonus + weapon.atkBonus + wargearAtkBonus;
   return Math.max(1, count);
 }
 
@@ -69,16 +120,29 @@ export function weaponHitTarget(
   if (!weapon.hit) return 0;
   const key = weapon.hit.toLowerCase() as keyof CharacterSheet;
   const base = Number(sheet[key]) || 0;
+  // bonuses.meleeHitBonus already includes sheet-wide equipped-wargear melee
+  // bonuses (e.g. Holy Water) since those apply to every melee weapon;
+  // ranged HIT bonuses from wargear are weapon-linked, so they're added
+  // separately here rather than living in the sheet-wide total.
   const abilityBonus = weapon.kind === "melee" ? bonuses.meleeHitBonus : bonuses.rangedHitBonus;
-  return base + abilityBonus + weapon.hitBonus;
+  const wargearHitBonus = weapon.kind === "ranged" ? wargearBonusForWeapon(sheet, weapon).hitBonus : 0;
+  return base + abilityBonus + wargearHitBonus + weapon.hitBonus;
 }
 
-/** Effective SAV = base stat + ability bonuses (e.g. Wary, Master Crafted). */
+/** Effective SAV = base stat + ability/wargear bonuses (e.g. Wary, equipped armor). */
 export function effectiveSav(
   sheet: CharacterSheet,
   bonuses: ComputedBonuses = computeBonuses(sheet)
 ): number {
   return sheet.sav + bonuses.savBonus;
+}
+
+/** Effective TGH = base stat + ability/wargear bonuses (e.g. equipped Storm Shield). */
+export function effectiveTgh(
+  sheet: CharacterSheet,
+  bonuses: ComputedBonuses = computeBonuses(sheet)
+): number {
+  return sheet.tgh + bonuses.tghBonus;
 }
 
 /**

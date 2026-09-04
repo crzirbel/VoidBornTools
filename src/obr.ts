@@ -1,7 +1,7 @@
 import OBR from "@owlbear-rodeo/sdk";
 import type { Player } from "@owlbear-rodeo/sdk";
 import type { CharacterSheet, RollLogEntry, TokenPool, TokenType } from "./types";
-import { emptySheet, emptyAbilityEffects, defaultTokenPool, MAX_TOKENS, makeId } from "./types";
+import { emptySheet, emptyAbilityEffects, emptyWargearEffects, defaultTokenPool, MAX_TOKENS, makeId } from "./types";
 import type { ResultPayload } from "./ui/result";
 
 const ID = "com.madisonmetro.voidborn";
@@ -41,6 +41,7 @@ function summarize(sheet: CharacterSheet): Record<string, unknown> {
     weapons: sheet.weapons.length,
     abilities: sheet.abilities.length,
     wargear: sheet.wargear.length,
+    inventory: sheet.inventory.length,
   };
 }
 
@@ -68,7 +69,18 @@ export function migrateSheet(stored: unknown): CharacterSheet {
     merged.abilities = merged.abilities.map((a) => ({ ...a, effects: a.effects ?? emptyAbilityEffects() }));
   }
 
-  if (!Array.isArray(merged.wargear)) merged.wargear = [];
+  if (!Array.isArray(merged.wargear)) {
+    merged.wargear = [];
+  } else {
+    // Backfill equip/effects fields on wargear saved before those existed.
+    merged.wargear = merged.wargear.map((w) => ({
+      ...w,
+      equipped: (w as any).equipped ?? false,
+      effects: { ...emptyWargearEffects(), ...((w as any).effects ?? {}) },
+    }));
+  }
+
+  if (!Array.isArray(merged.inventory)) merged.inventory = [];
 
   if (!Array.isArray(merged.weapons)) {
     merged.weapons = [];

@@ -148,9 +148,24 @@ function buildExportLayout(sheet: CharacterSheet): HTMLElement {
     box.appendChild(sectionHeading("Wargear"));
     for (const w of sheet.wargear) {
       const row = el("div", { marginBottom: "5px" });
-      const label = w.quantity !== 1 ? `${w.name || "Unnamed"} (x${w.quantity}): ` : `${w.name || "Unnamed"}: `;
+      const equippedTag = w.equipped ? " (Equipped)" : "";
+      const label = w.quantity !== 1 ? `${w.name || "Unnamed"} (x${w.quantity})${equippedTag}: ` : `${w.name || "Unnamed"}${equippedTag}: `;
       row.appendChild(el("span", { fontWeight: "bold" }, label));
       row.appendChild(document.createTextNode(w.description || ""));
+      box.appendChild(row);
+    }
+    root.appendChild(box);
+  }
+
+  // Inventory
+  if (sheet.inventory.length > 0) {
+    const box = sectionBox();
+    box.appendChild(sectionHeading("Inventory"));
+    for (const i of sheet.inventory) {
+      const row = el("div", { marginBottom: "5px" });
+      const label = i.quantity !== 1 ? `${i.name || "Unnamed"} (x${i.quantity}): ` : `${i.name || "Unnamed"}: `;
+      row.appendChild(el("span", { fontWeight: "bold" }, label));
+      row.appendChild(document.createTextNode(i.description || ""));
       box.appendChild(row);
     }
     root.appendChild(box);

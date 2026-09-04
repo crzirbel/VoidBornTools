@@ -190,9 +190,25 @@ function renderSheetSummary(sheet: CharacterSheet | null): HTMLElement {
     box.appendChild(sectionLabel);
     for (const w of sheet.wargear) {
       const qtyLabel = w.quantity !== 1 ? ` (x${w.quantity})` : "";
+      const equippedLabel = w.equipped ? " [Equipped]" : "";
       const line = document.createElement("div");
       line.className = "roster-line";
-      line.innerHTML = `<strong>${escapeHtml(w.name || "Unnamed")}${qtyLabel}:</strong> ${escapeHtml(w.description)}`;
+      line.innerHTML = `<strong>${escapeHtml(w.name || "Unnamed")}${qtyLabel}${equippedLabel}:</strong> ${escapeHtml(w.description)}`;
+      box.appendChild(line);
+    }
+  }
+
+  // Inventory
+  if (sheet.inventory.length > 0) {
+    const sectionLabel = document.createElement("div");
+    sectionLabel.className = "roster-section-label";
+    sectionLabel.textContent = "Inventory";
+    box.appendChild(sectionLabel);
+    for (const i of sheet.inventory) {
+      const qtyLabel = i.quantity !== 1 ? ` (x${i.quantity})` : "";
+      const line = document.createElement("div");
+      line.className = "roster-line";
+      line.innerHTML = `<strong>${escapeHtml(i.name || "Unnamed")}${qtyLabel}:</strong> ${escapeHtml(i.description)}`;
       box.appendChild(line);
     }
   }

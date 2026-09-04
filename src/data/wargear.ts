@@ -1,30 +1,34 @@
 import type { WargearEntry } from "../types";
-import { makeId } from "../types";
+import { makeId, emptyWargearEffects } from "../types";
 
 export interface WargearCatalogEntry {
   name: string;
   category: string;
   gold: number;
   description: string;
+  // Only set on the handful of items that actually move the sheet's math
+  // (armor, fields, shields, and a few named Wargear pieces). Everything
+  // else is flavor-only and gets emptyWargearEffects() at add-time.
+  effects?: Partial<import("../types").WargearEffects>;
 }
 
 const ARMOR: WargearCatalogEntry[] = [
-  { name: "Flak Armor", category: "Armor", gold: 10, description: "Gives wearer 2 SAV" },
-  { name: "Mesh Armor", category: "Armor", gold: 20, description: "Gives wearer 3 SAV" },
-  { name: "Carapace Armor", category: "Armor", gold: 40, description: "Gives wearer 4 SAV" },
-  { name: "Power Armor", category: "Armor", gold: 60, description: "Gives wearer 5 SAV" },
-  { name: "Terminator Armor", category: "Armor", gold: 120, description: "Gives wearer 6 SAV" },
-  { name: "Refractor Field", category: "Armor", gold: 50, description: "Gives wearer 3 Invulnerable SAV" },
-  { name: "Conversion Field", category: "Armor", gold: 100, description: "Gives wearer 5 Invulnerable SAV" },
-  { name: "Combat Shield", category: "Armor", gold: 20, description: "Gives wearer SAV +1" },
+  { name: "Flak Armor", category: "Armor", gold: 10, description: "Gives wearer 2 SAV", effects: { savBonus: 2, savCategory: "armorOrField" } },
+  { name: "Mesh Armor", category: "Armor", gold: 20, description: "Gives wearer 3 SAV", effects: { savBonus: 3, savCategory: "armorOrField" } },
+  { name: "Carapace Armor", category: "Armor", gold: 40, description: "Gives wearer 4 SAV", effects: { savBonus: 4, savCategory: "armorOrField" } },
+  { name: "Power Armor", category: "Armor", gold: 60, description: "Gives wearer 5 SAV", effects: { savBonus: 5, savCategory: "armorOrField" } },
+  { name: "Terminator Armor", category: "Armor", gold: 120, description: "Gives wearer 6 SAV", effects: { savBonus: 6, savCategory: "armorOrField" } },
+  { name: "Refractor Field", category: "Armor", gold: 50, description: "Gives wearer 3 Invulnerable SAV", effects: { savBonus: 3, savCategory: "armorOrField" } },
+  { name: "Conversion Field", category: "Armor", gold: 100, description: "Gives wearer 5 Invulnerable SAV", effects: { savBonus: 5, savCategory: "armorOrField" } },
+  { name: "Combat Shield", category: "Armor", gold: 20, description: "Gives wearer SAV +1", effects: { savBonus: 1, savCategory: "shield" } },
   { name: "Boarding Shield", category: "Armor", gold: 20, description: "Grants Cover to the wearer" },
-  { name: "Storm Shield", category: "Armor", gold: 20, description: "Gives wearer TGH +1" },
+  { name: "Storm Shield", category: "Armor", gold: 20, description: "Gives wearer TGH +1", effects: { tghBonus: 1, savCategory: "shield" } },
 ];
 
 const WARGEAR: WargearCatalogEntry[] = [
   { name: "Eldar Cloak", category: "Wargear", gold: 20, description: "Grants Cover to the wearer" },
   { name: "Grapnel Launcher", category: "Wargear", gold: 20, description: "Move through the air in straight lines. Must end on solid ground" },
-  { name: "Holy Water", category: "Wargear", gold: 20, description: "+1 to HIT for melee weapon" },
+  { name: "Holy Water", category: "Wargear", gold: 20, description: "+1 to HIT for melee weapon", effects: { meleeHitBonus: 1 } },
   { name: "Holy/Unholy Relic", category: "Wargear", gold: 20, description: "Automatically pass one PRS test of your choice" },
   { name: "Icon/Flag", category: "Wargear", gold: 20, description: "When activating this unit, you can choose to activate a second unit at the same time within 6\". Any broken models within 6\" also rally" },
   { name: "Jump Pack", category: "Wargear", gold: 20, description: "MOV becomes 12\", can fly" },
@@ -32,10 +36,10 @@ const WARGEAR: WargearCatalogEntry[] = [
   { name: "Lucky Charm", category: "Wargear", gold: 20, description: "Can ignore first Wound per game to the model carrying the charm" },
   { name: "Medipack", category: "Wargear", gold: 20, description: "Ignore first Wound per game to a model within 3\", but not the bearer" },
   { name: "Rounds - Executioner", category: "Wargear", gold: 20, description: "Add Precise to a ranged weapon" },
-  { name: "Rounds - Hellfire", category: "Wargear", gold: 20, description: "+1D10 ATK to a ranged weapon" },
+  { name: "Rounds - Hellfire", category: "Wargear", gold: 20, description: "+1D10 ATK to a ranged weapon", effects: { rangedAtkBonus: 1 } },
   { name: "Rounds - Kraken", category: "Wargear", gold: 20, description: "Add Pierce to a ranged weapon" },
   { name: "Sight - Infra", category: "Wargear", gold: 20, description: "Ignore Cover for a ranged weapon" },
-  { name: "Sight - Laser", category: "Wargear", gold: 20, description: "+1 HIT for a ranged weapon" },
+  { name: "Sight - Laser", category: "Wargear", gold: 20, description: "+1 HIT for a ranged weapon", effects: { rangedHitBonus: 1 } },
   { name: "Stimms", category: "Wargear", gold: 20, description: "+2 to all rolls for one turn. -2 to all rolls for the next turn" },
   { name: "Vox Caster", category: "Wargear", gold: 20, description: "When activating this unit, you can choose to activate a second unit at the same time within 12\"" },
 ];
@@ -121,6 +125,8 @@ export function wargearFromCatalog(entry: WargearCatalogEntry): WargearEntry {
     name: entry.name,
     quantity: 1,
     description: entry.description,
+    equipped: false,
+    effects: { ...emptyWargearEffects(), ...(entry.effects ?? {}) },
   };
 }
 
