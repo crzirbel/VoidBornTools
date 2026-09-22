@@ -8,6 +8,13 @@ const RADIUS = 100;
 const LABEL_RADIUS = 78;
 const NEEDLE_LENGTH = 88;
 const SECTOR_ANGLE = 360 / COMPASS_DIRECTIONS.length; // 22.5deg
+// Sector i (for direction i) is drawn as [i*SECTOR_ANGLE, (i+1)*SECTOR_ANGLE)
+// with its label at the sector's center - i.e. i*SECTOR_ANGLE + half a
+// sector. Without this offset, N's label (i=0) would sit at +11.25deg
+// instead of dead center at 0deg/straight up, and every other direction
+// would be equally off. Shifting every sector start back by half a sector
+// centers each one exactly on its true compass bearing instead.
+const SECTOR_OFFSET = -SECTOR_ANGLE / 2;
 // Keep the landing point clear of the sector boundary lines so it's never
 // ambiguous which sector the needle is pointing into.
 const SECTOR_EDGE_MARGIN = SECTOR_ANGLE * 0.18;
@@ -44,7 +51,7 @@ function buildWheelSvg(): { svg: SVGSVGElement; needleGroup: SVGGElement } {
   // (added below) rotates to point at the result. All-white sectors with
   // black divider lines, matching the sheet's black/white aesthetic.
   COMPASS_DIRECTIONS.forEach((label, i) => {
-    const startAngle = i * SECTOR_ANGLE;
+    const startAngle = i * SECTOR_ANGLE + SECTOR_OFFSET;
     const endAngle = startAngle + SECTOR_ANGLE;
     const path = document.createElementNS(ns, "path");
     path.setAttribute("d", describeSectorPath(startAngle, endAngle));
@@ -158,7 +165,7 @@ export function buildDirectionWheelPanel(
     // directions - keep a small margin from the edges so it's never
     // ambiguous which sector it landed in.
     const spread = SECTOR_ANGLE - 2 * SECTOR_EDGE_MARGIN;
-    const targetAngle = result.index * SECTOR_ANGLE + SECTOR_EDGE_MARGIN + Math.random() * spread;
+    const targetAngle = result.index * SECTOR_ANGLE + SECTOR_OFFSET + SECTOR_EDGE_MARGIN + Math.random() * spread;
     const currentMod = ((cumulativeRotation % 360) + 360) % 360;
     let delta = targetAngle - currentMod;
     if (delta <= 0) delta += 360;
