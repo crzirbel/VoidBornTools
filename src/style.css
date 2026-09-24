@@ -1,3 +1,20 @@
+/* Special Elite, self-hosted (Apache 2.0 - see public/fonts/SpecialElite-LICENSE.txt)
+   so its vertical metrics can be corrected. The stock font reports a very
+   short ascent (0.70em, barely above cap height) and a tall descent
+   (0.30em), so every line box has its empty space BELOW the text - in the
+   tight input/select boxes that made text look shifted up and clip at the
+   top (issue #15). These overrides rebalance the line box around the
+   glyphs; the glyphs themselves are unchanged. Registered under its own
+   family name so it can't collide with a Google Fonts copy of the font. */
+@font-face {
+  font-family: "Special Elite VB";
+  src: url("/fonts/SpecialElite.woff2") format("woff2");
+  font-display: swap;
+  ascent-override: 84%;
+  descent-override: 18%;
+  line-gap-override: 0%;
+}
+
 :root {
   --bg: #ffffff;
   --bg-panel: #ffffff;
@@ -11,7 +28,7 @@
   --red-bright: #a92222;
   --green: #1f5e2a;
   --font-heading: "Black Ops One", "Arial Narrow", sans-serif;
-  --font-body: "Special Elite", "Courier New", monospace;
+  --font-body: "Special Elite VB", "Courier New", monospace;
 }
 
 * {
@@ -308,6 +325,24 @@ textarea {
   font-size: 0.75rem;
   width: 100%;
   min-width: 0;
+}
+
+/* The native dropdown arrow ate most of the narrow HIT/Kind columns,
+   clipping "STR"/"PRS"/"Ranged" (issue #15). A small drawn arrow leaves
+   room for the value; no arrow at all while the sheet is locked. */
+.weapon-row select {
+  -webkit-appearance: none;
+  appearance: none;
+  padding-right: 0.95rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath d='M0 0h8L4 5z' fill='%23111'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.3rem center;
+  background-size: 0.5rem auto;
+}
+
+.weapon-row select:disabled {
+  background-image: none;
+  padding-right: 0.25rem;
 }
 
 .weapon-row .actions-cell {

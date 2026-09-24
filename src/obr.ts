@@ -3,6 +3,8 @@ import type { Player } from "@owlbear-rodeo/sdk";
 import type { CharacterSheet, RollLogEntry, TokenPool, TokenType } from "./types";
 import { emptySheet, emptyAbilityEffects, emptyWargearEffects, defaultTokenPool, MAX_TOKENS, makeId } from "./types";
 import type { ResultPayload } from "./ui/result";
+import { packSheet, hydrateStoredSheet } from "./sheetCodec";
+import { fetchGmSheet, putGmSheet } from "./gmStore";
 
 const ID = "com.madisonmetro.voidborn";
 const SHEET_PREFIX = `${ID}/sheet/`; // sheets live in ROOM metadata, one key per player id
@@ -12,6 +14,9 @@ const TOKEN_POOL_KEY = `${ID}/tokens`;
 const GM_ACTIVE_SLOT_PREFIX = `${ID}/gmActiveSlot/`; // which of the 4 slots an Arbitrator last had open
 const ROLL_CHANNEL = `${ID}/roll-toast`;
 const MAX_LOG_ENTRIES = 30;
+// The log also shares the room's ~16kB cap, so it's capped by size as well
+// as by count - long table-result rolls drop the oldest entries sooner.
+const MAX_LOG_BYTES = 4 * 1024;
 export const GM_SLOT_COUNT = 4;
 
 // Owlbear room metadata has a documented 16kB TOTAL cap, shared by the Log,
@@ -19,10 +24,66 @@ export const GM_SLOT_COUNT = 4;
 // that hard limit so a heavily-loaded party doesn't find out via a failed
 // or truncated save.
 const ROOM_METADATA_WARN_BYTES = 14 * 1024;
+const ROOM_METADATA_CAP_BYTES = 16 * 1024;
 let sizeWarningShownThisSession = false;
 
 function byteSize(value: unknown): number {
   return new TextEncoder().encode(JSON.stringify(value)).length;
+}
+
+function totalRoomBytes(metadata: Record<string, unknown>): number {
+  return Object.values(metadata).reduce((sum: number, v) => sum + byteSize(v), 0);
+}
+
+/** Approximate bytes currently used in this room's shared metadata. */
+export async function roomMetadataBytes(): Promise<number> {
+  return totalRoomBytes(await OBR.room.getMetadata());
+}
+
+// Failures tend to arrive in bursts (every keystroke-save, every roll), so
+// the same message is shown at most once every few seconds.
+const lastNotified = new Map<string, number>();
+function notifyThrottled(message: string, variant: "WARNING" | "ERROR", windowMs = 8000) {
+  const now = Date.now();
+  if (now - (lastNotified.get(message) ?? 0) < windowMs) return;
+  lastNotified.set(message, now);
+  showNativeNotification(message, variant);
+}
+
+/**
+ * Called whenever a write to room metadata (log entry, token pool, a
+ * player's sheet) is rejected. These used to fail silently or with a
+ * generic message; when the room is at its storage cap, say so, since that
+ * was the real cause behind the "rolls not landing in the log" and "sheet
+ * didn't save" reports (issues #13, #14).
+ */
+export async function reportRoomWriteFailure(what: string, err: unknown): Promise<void> {
+  console.error(`[VoidBorn] Failed to save ${what} to room metadata:`, err);
+  let bytes: number | null = null;
+  try {
+    bytes = await roomMetadataBytes();
+  } catch {
+    // can't measure - fall through to the generic message
+  }
+  if (bytes !== null && bytes >= ROOM_METADATA_WARN_BYTES) {
+    const kb = (bytes / 1024).toFixed(1);
+    notifyThrottled(
+      `Couldn't save ${what}: this room's shared storage is full (~${kb} of ${ROOM_METADATA_CAP_BYTES / 1024} kB). Clearing the Log or trimming long sheet descriptions will free space.`,
+      "ERROR"
+    );
+  } else {
+    notifyThrottled(`Couldn't save ${what} to the room. Check your connection and try again.`, "ERROR");
+  }
+}
+
+/** Thrown by saveSheet for an Arbitrator slot when the server already holds a newer copy (saved from another tab/device). */
+export class StaleSheetError extends Error {
+  readonly newer: CharacterSheet;
+  constructor(newer: CharacterSheet) {
+    super("A newer copy of this sheet was already saved elsewhere");
+    this.name = "StaleSheetError";
+    this.newer = newer;
+  }
 }
 
 function sheetKey(playerId: string): string {
@@ -41,6 +102,11 @@ function sheetKey(playerId: string): string {
  */
 export function gmSlotStorageId(gmPlayerId: string, slot: number): string {
   return `${gmPlayerId}::gmSlot${slot}`;
+}
+
+/** Arbitrator slot sheets are stored by the Worker (see gmStore.ts), not in room metadata. */
+function isGmSlotId(storageId: string): boolean {
+  return /::gmSlot\d+$/.test(storageId);
 }
 
 function gmActiveSlotKey(gmPlayerId: string): string {
@@ -81,6 +147,10 @@ function summarize(sheet: CharacterSheet): Record<string, unknown> {
  * - `wargear` and `handle` are newly added fields.
  */
 export function migrateSheet(stored: unknown): CharacterSheet {
+  // Sheets in room metadata are stored packed (defaults and catalog
+  // descriptions stripped - see sheetCodec.ts); restore them first. No-op
+  // for full-size sheets from older versions, JSON imports, etc.
+  stored = hydrateStoredSheet(stored);
   const base = emptySheet();
   if (!stored || typeof stored !== "object") return base;
 
@@ -146,7 +216,7 @@ export function migrateSheet(stored: unknown): CharacterSheet {
  * before a write actually starts failing or getting truncated.
  */
 function checkRoomMetadataSize(metadata: Record<string, unknown>): void {
-  const totalBytes = Object.values(metadata).reduce((sum: number, v) => sum + byteSize(v), 0);
+  const totalBytes = totalRoomBytes(metadata);
   if (totalBytes <= ROOM_METADATA_WARN_BYTES) return;
   logSheet(
     `saveSheet: WARNING - combined room metadata is ~${totalBytes} bytes, approaching Owlbear's ~16kB room metadata cap.`
@@ -186,6 +256,7 @@ export async function getPlayerId(): Promise<string> {
  * with heavily-loaded characters.
  */
 export async function loadSheet(playerId: string, checkLegacy = true): Promise<CharacterSheet> {
+  if (isGmSlotId(playerId)) return loadGmSlotSheet(playerId);
   logSheet("loadSheet: calling OBR.room.getMetadata()...");
   const metadata = await OBR.room.getMetadata();
   const raw = metadata[sheetKey(playerId)];
@@ -245,18 +316,21 @@ export async function loadSheet(playerId: string, checkLegacy = true): Promise<C
  * on as the sole safety net anymore.
  */
 export async function saveSheet(playerId: string, sheet: CharacterSheet): Promise<CharacterSheet> {
+  if (isGmSlotId(playerId)) return saveGmSlotSheet(playerId, sheet);
   const stamped: CharacterSheet = { ...sheet, updatedAt: Date.now() };
+  // What actually goes into room metadata - see sheetCodec.ts.
+  const packed = packSheet(stamped);
   const key = sheetKey(playerId);
-  logSheet("saveSheet: attempting to save", summarize(stamped));
+  logSheet("saveSheet: attempting to save", summarize(stamped), `(${byteSize(packed)} bytes packed)`);
   const MAX_ATTEMPTS = 3;
   let lastError: unknown;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
-      await OBR.room.setMetadata({ [key]: stamped });
+      await OBR.room.setMetadata({ [key]: packed });
       logSheet(`saveSheet: attempt ${attempt} - setMetadata resolved, verifying...`);
       const confirmed = await OBR.room.getMetadata();
       const confirmedSheet = confirmed[key];
-      if (JSON.stringify(confirmedSheet) === JSON.stringify(stamped)) {
+      if (JSON.stringify(confirmedSheet) === JSON.stringify(packed)) {
         logSheet(`saveSheet: attempt ${attempt} - verified OK`, summarize(stamped));
         checkRoomMetadataSize(confirmed);
         return stamped;
@@ -288,6 +362,8 @@ export async function saveSheet(playerId: string, sheet: CharacterSheet): Promis
  * recent local edit that just hasn't finished round-tripping yet.
  */
 export function onSheetChange(playerId: string, callback: (sheet: CharacterSheet) => void) {
+  // Arbitrator slots aren't in room metadata, so there's nothing to watch.
+  if (isGmSlotId(playerId)) return () => {};
   const key = sheetKey(playerId);
   return OBR.room.onMetadataChange((metadata) => {
     const raw = metadata[key];
@@ -312,6 +388,7 @@ export async function loadLog(): Promise<RollLogEntry[]> {
 export async function pushLogEntry(entry: RollLogEntry): Promise<void> {
   const current = await loadLog();
   const next = [...current, entry].slice(-MAX_LOG_ENTRIES);
+  while (next.length > 1 && byteSize(next) > MAX_LOG_BYTES) next.shift();
   await OBR.room.setMetadata({ [LOG_KEY]: next });
 }
 
@@ -433,4 +510,72 @@ export function showNativeNotification(
   variant: "DEFAULT" | "SUCCESS" | "WARNING" | "ERROR" = "DEFAULT"
 ): void {
   OBR.notification.show(message, variant);
+}
+
+// ---- Arbitrator slot sheets (stored by the Worker, not room metadata) ----
+
+/**
+ * Loads an Arbitrator slot sheet from the Worker. Also carries forward any
+ * copy of that slot still sitting in room metadata from v1.1 (keeping
+ * whichever is newer) and then deletes it from the room, which is what
+ * frees the space those sheets were taking up. The room copy is only
+ * removed after the Worker has accepted it.
+ *
+ * If the Worker can't be reached this returns a blank sheet; main.ts then
+ * falls back to this browser's local backup of the slot (it treats a blank
+ * load exactly like any other blank load).
+ */
+async function loadGmSlotSheet(storageId: string): Promise<CharacterSheet> {
+  const roomId = OBR.room.id;
+  let remote: CharacterSheet | null;
+  try {
+    const raw = await fetchGmSheet(roomId, storageId);
+    remote = raw === null ? null : migrateSheet(raw);
+    logSheet("loadGmSlotSheet: fetched", storageId, remote ? summarize(remote) : "(none saved yet)");
+  } catch (err) {
+    console.error("[VoidBorn/gm] Couldn't load Arbitrator slot from the sheet server:", err);
+    notifyThrottled("Couldn't reach the Void Born sheet server - showing this browser's saved copy of your slot if it has one.", "WARNING");
+    return emptySheet();
+  }
+
+  try {
+    const metadata = await OBR.room.getMetadata();
+    const roomRaw = metadata[sheetKey(storageId)];
+    if (roomRaw !== undefined) {
+      const roomCopy = migrateSheet(roomRaw);
+      if (!remote || roomCopy.updatedAt > remote.updatedAt) {
+        logSheet("loadGmSlotSheet: moving room-metadata copy to the sheet server", summarize(roomCopy));
+        const result = await putGmSheet(roomId, storageId, roomCopy);
+        remote = result.stale ? migrateSheet(result.sheet) : roomCopy;
+      }
+      await OBR.room.setMetadata({ [sheetKey(storageId)]: undefined });
+      logSheet("loadGmSlotSheet: removed room-metadata copy of", storageId);
+    }
+  } catch (err) {
+    // Non-fatal: the room copy stays put and this is retried on next load.
+    console.error("[VoidBorn/gm] Moving Arbitrator slot out of room metadata failed (will retry next load):", err);
+  }
+
+  return remote ?? emptySheet();
+}
+
+async function saveGmSlotSheet(storageId: string, sheet: CharacterSheet): Promise<CharacterSheet> {
+  const stamped: CharacterSheet = { ...sheet, updatedAt: Date.now() };
+  const roomId = OBR.room.id;
+  const MAX_ATTEMPTS = 3;
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      const result = await putGmSheet(roomId, storageId, stamped);
+      if (result.stale) throw new StaleSheetError(migrateSheet(result.sheet));
+      logSheet(`saveGmSlotSheet: attempt ${attempt} - saved`, storageId, summarize(stamped));
+      return stamped;
+    } catch (err) {
+      if (err instanceof StaleSheetError) throw err;
+      logSheet(`saveGmSlotSheet: attempt ${attempt} - failed`, err);
+      lastError = err;
+    }
+    if (attempt < MAX_ATTEMPTS) await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }

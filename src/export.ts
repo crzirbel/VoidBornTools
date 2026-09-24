@@ -3,7 +3,7 @@ import type { CharacterSheet } from "./types";
 import { computeBonuses, effectiveSav } from "./combat";
 
 const HEADING_FONT = '"Black Ops One", "Arial Narrow", sans-serif';
-const BODY_FONT = '"Special Elite", "Courier New", monospace';
+const BODY_FONT = '"Special Elite VB", "Courier New", monospace';
 
 function el(tag: string, styles: Partial<CSSStyleDeclaration>, text?: string): HTMLElement {
   const node = document.createElement(tag);

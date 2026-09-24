@@ -82,18 +82,37 @@ async function saveSheet(updated: CharacterSheet) {
     postToOpener({ kind: "save-sheet", sheet: updated });
     return;
   }
+  const storageId = sheetStorageId();
   try {
-    const storageId = sheetStorageId();
     sheet = await obr.saveSheet(storageId, sheet);
     backupSheetLocally(storageId, sheet);
     if (role === "GM") gmSlotNames[gmSlot - 1] = sheet.name;
     syncPopout();
   } catch (err) {
-    console.error("Failed to save character sheet:", err);
-    obr.showNativeNotification(
-      "Your sheet failed to save! Your last changes may not be kept - check your connection and try again, or export a JSON backup now.",
-      "ERROR"
-    );
+    if (err instanceof obr.StaleSheetError) {
+      // Arbitrator slot edited from another tab/device more recently than
+      // this one - take that copy rather than overwrite it.
+      cancelPendingSave();
+      sheet = err.newer;
+      backupSheetLocally(storageId, sheet);
+      gmSlotNames[gmSlot - 1] = sheet.name;
+      obr.showNativeNotification("This slot was changed from another window or device - loaded the newer copy.", "WARNING");
+      render();
+      syncPopout();
+      return;
+    }
+    // The local backup still gets this edit, so it isn't lost even when
+    // the real save failed; loadAndReconcileSheet picks it up next load.
+    backupSheetLocally(storageId, sheet);
+    if (role === "GM") {
+      console.error("Failed to save Arbitrator slot sheet:", err);
+      obr.showNativeNotification(
+        "Your slot sheet failed to save to the sheet server. This browser kept a copy - check your connection, or export a JSON backup now.",
+        "ERROR"
+      );
+    } else {
+      await obr.reportRoomWriteFailure("your sheet", err);
+    }
   }
 }
 
@@ -113,14 +132,26 @@ async function handleRoll(entry: RollLogEntry) {
     postToOpener({ kind: "roll", entry });
     return;
   }
-  await obr.pushLogEntry(entry);
-  await obr.broadcastRollResult({
-    playerName: entry.playerName,
-    title: entry.label,
-    dice: entry.dice,
-    outcome: entry.outcome,
-    detail: entry.detail ?? (entry.target !== undefined ? `Target: ${entry.target}` : undefined),
-  });
+  // The log write and the result toast are independent: a full room (or
+  // any other log-write failure) used to throw here and skip the toast too,
+  // so the roll vanished for everyone (issue #13). Now the toast always goes
+  // out and the failure is reported.
+  try {
+    await obr.pushLogEntry(entry);
+  } catch (err) {
+    await obr.reportRoomWriteFailure("that roll to the Log", err);
+  }
+  try {
+    await obr.broadcastRollResult({
+      playerName: entry.playerName,
+      title: entry.label,
+      dice: entry.dice,
+      outcome: entry.outcome,
+      detail: entry.detail ?? (entry.target !== undefined ? `Target: ${entry.target}` : undefined),
+    });
+  } catch (err) {
+    console.error("[VoidBorn/main] Roll broadcast failed:", err);
+  }
 }
 
 async function clearLog() {
@@ -128,7 +159,11 @@ async function clearLog() {
     postToOpener({ kind: "clear-log" });
     return;
   }
-  await obr.clearLog();
+  try {
+    await obr.clearLog();
+  } catch (err) {
+    await obr.reportRoomWriteFailure("the cleared Log", err);
+  }
 }
 
 async function handleSpendLuck(index: number) {
@@ -136,7 +171,12 @@ async function handleSpendLuck(index: number) {
     postToOpener({ kind: "flip-token", index, to: "chaos" });
     return;
   }
-  await obr.flipToken(index, "chaos");
+  try {
+    await obr.flipToken(index, "chaos");
+  } catch (err) {
+    await obr.reportRoomWriteFailure("the token flip", err);
+    return;
+  }
   await handleRoll(buildTokenSpendLogEntry(playerName, "luck"));
 }
 
@@ -145,7 +185,12 @@ async function handleSpendChaos(index: number) {
     postToOpener({ kind: "flip-token", index, to: "luck" });
     return;
   }
-  await obr.flipToken(index, "luck");
+  try {
+    await obr.flipToken(index, "luck");
+  } catch (err) {
+    await obr.reportRoomWriteFailure("the token flip", err);
+    return;
+  }
   await handleRoll(buildTokenSpendLogEntry(playerName, "chaos"));
 }
 
@@ -154,7 +199,13 @@ async function handleBurnToken(index: number) {
     postToOpener({ kind: "burn-token", index });
     return;
   }
-  const burned = await obr.burnToken(index);
+  let burned: Awaited<ReturnType<typeof obr.burnToken>>;
+  try {
+    burned = await obr.burnToken(index);
+  } catch (err) {
+    await obr.reportRoomWriteFailure("the burned token", err);
+    return;
+  }
   if (burned) await handleRoll(buildTokenBurnLogEntry(playerName, burned));
 }
 
@@ -163,7 +214,13 @@ async function handleGrantToken() {
     postToOpener({ kind: "grant-token" });
     return;
   }
-  const granted = await obr.grantLuckToken();
+  let granted: boolean;
+  try {
+    granted = await obr.grantLuckToken();
+  } catch (err) {
+    await obr.reportRoomWriteFailure("the granted token", err);
+    return;
+  }
   if (granted) await handleRoll(buildTokenGrantLogEntry(playerName));
 }
 
@@ -594,17 +651,14 @@ async function initEmbedded() {
       } else if (msg.kind === "clear-log" && role === "GM") {
         clearLog();
       } else if (msg.kind === "flip-token") {
-        obr.flipToken(msg.index, msg.to).then(() => {
-          handleRoll(buildTokenSpendLogEntry(playerName, msg.to === "chaos" ? "luck" : "chaos"));
-        });
+        // Same handlers as the embedded buttons (isPopout is false in this
+        // window), so popout actions get identical error handling.
+        if (msg.to === "chaos") handleSpendLuck(msg.index);
+        else handleSpendChaos(msg.index);
       } else if (msg.kind === "burn-token") {
-        obr.burnToken(msg.index).then((burned) => {
-          if (burned) handleRoll(buildTokenBurnLogEntry(playerName, burned));
-        });
+        handleBurnToken(msg.index);
       } else if (msg.kind === "grant-token" && role === "GM") {
-        obr.grantLuckToken().then((granted) => {
-          if (granted) handleRoll(buildTokenGrantLogEntry(playerName));
-        });
+        handleGrantToken();
       } else if (msg.kind === "switch-gm-slot" && role === "GM") {
         switchGmSlot(msg.slot);
       }

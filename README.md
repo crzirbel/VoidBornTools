@@ -3,9 +3,9 @@
 A character sheet, dice roller, and Arbitrator resolution-table tool for the **Void Born**
 (Departmento Colonia) tabletop RPG, built as an [Owlbear Rodeo](https://www.owlbear.rodeo/) extension.
 
-Current version: **v1.1**
+Current version: **v1.1.1**
 
-## Patch changelog (v1.0.1 - v1.0.5)
+## Patch changelog (v1.0.1 - v1.1.1)
 
 These point releases aren't shown in the in-app About tab (which covers
 feature-level milestones only) but are recorded here for reference:
@@ -45,6 +45,20 @@ feature-level milestones only) but are recorded here for reference:
   per player (previously one shared backup slot per browser). Added a
   warning (console + one-time in-room notice) if a room's combined saved
   data is approaching Owlbear's ~16kB room metadata limit.
+- **v1.1.1** — Fixed rolls, token flips and sheet saves failing once a room
+  filled Owlbear's ~16kB shared room storage (#13, #14). The Arbitrator's
+  four slot sheets now live in the site's own database (Cloudflare D1, via
+  the Worker) instead of room metadata; existing slots move over
+  automatically the first time the Arbitrator opens them, and the room copy
+  is deleted once the move succeeds. Player sheets are stored in a compact
+  form (defaults and unedited catalog descriptions left out, restored on
+  load) - roughly a third of their previous size. The Log is now also capped
+  at ~4kB. A failed Log/token/sheet write now shows an error that says when
+  the room's storage is full, and a roll's result pop-up still reaches
+  everyone even if its Log entry couldn't be saved. Fixed text sitting high
+  and clipping in sheet boxes, and "STR"/"PRS"/"Ranged" being cut off in the
+  weapon dropdowns (#15) - Special Elite is now self-hosted with corrected
+  line metrics.
 
 ## Features
 
@@ -86,12 +100,14 @@ feature-level milestones only) but are recorded here for reference:
   repo's GitHub Issues via a Cloudflare Worker API route (`/api/*`), with a
   honeypot spam guard.
 
-Character sheets, the roll log, and the Luck & Chaos token pool are all
+Player character sheets, the roll log, and the Luck & Chaos token pool are
 stored in shared room metadata (keyed per player for sheets, so one
 player's save can't collide with another's). Room metadata has a documented
-16kB total cap shared across everything an extension stores there, so a
-very large party with heavily-loaded characters could theoretically
-approach it - worth keeping an eye on. Sheets previously lived in Owlbear's
+16kB total cap shared across everything an extension stores there, so
+sheets are stored in a compact form (`sheetCodec.ts`) and the log is capped
+by size. The Arbitrator's four slot sheets are stored separately in a
+Cloudflare D1 database behind the Worker (`/api/gm-sheet`), keyed by room,
+so they don't count toward that cap. Sheets previously lived in Owlbear's
 player metadata, which turned out not to reliably survive a page reload
 despite saves reporting success; `obr.ts` still checks that old location
 once as a fallback and carries any legacy data forward automatically.
@@ -130,11 +146,21 @@ Config lives in `wrangler.jsonc` at the project root:
 {
   "name": "voidborntools",
   "compatibility_date": "2026-08-01",
+  "main": "src/api-worker.ts",
   "assets": {
-    "directory": "./dist"
-  }
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    { "binding": "DB", "database_name": "voidborn", "database_id": "<id>" }
+  ]
 }
 ```
+
+The D1 database (Arbitrator slot sheets) is created once with
+`npx wrangler d1 create voidborn`; paste the id it prints into
+`wrangler.jsonc`. The Worker creates its table on first use.
 
 Build command: `npm run build`
 Deploy command: `npx wrangler deploy`
@@ -160,6 +186,7 @@ public/
   manifest.json        # Extension manifest (name, action, embed URL)
   icon.svg              # Action bar icon
   icons/                 # Luck/Chaos token artwork (Aquila, Chaos Star)
+  fonts/                  # Self-hosted Special Elite (Apache 2.0) with its license
   _headers               # CORS headers for cross-origin manifest fetch
 wrangler.jsonc          # Cloudflare Workers static assets config
 index.html              # Popover entry point (loaded in the OBR iframe)
@@ -169,7 +196,10 @@ src/
   main.ts                # App bootstrap, tab routing, OBR <-> popout bridge
   editor.ts               # Standalone offline sheet editor
   feedback.ts              # Standalone feedback form -> GitHub Issues
-  api-worker.ts             # Cloudflare Worker: feedback-to-GitHub-Issues API
+  api-worker.ts             # Cloudflare Worker: feedback-to-GitHub-Issues API,
+                             # Arbitrator slot-sheet storage (D1)
+  gmStore.ts                 # Client for the Worker's Arbitrator slot-sheet API
+  sheetCodec.ts              # Compact sheet encoding for room metadata
   types.ts                  # CharacterSheet / RollLogEntry / TokenPool types
   dice.ts                    # Dice rolling + table lookup + log-entry builders
   combat.ts                   # ATK/HIT/DMG resolution, weapon bonus math
